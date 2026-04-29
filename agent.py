@@ -12,7 +12,11 @@ import tempfile
 import wave
 import torch
 import time
+import chromadb
+from sentence_transformers import SentenceTransformer
 from faster_whisper import WhisperModel
+from openwakeword.model import Model as WakeWordModel
+from datetime import datetime
 
 # Check GPU
 print(f"Using GPU: {torch.cuda.get_device_name(0)}")
@@ -26,6 +30,18 @@ whisper_model = WhisperModel(
 )
 print("Whisper ready!")
 
+# Load wake word model
+print("Loading wake word model...")
+wake_word_model = WakeWordModel(wakeword_models=["hey_jarvis"], inference_framework="tflite")
+print("Wake word ready!")
+
+# Load memory system
+print("Loading memory system...")
+memory_client = chromadb.PersistentClient(path="memory")
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
+memory_collection = memory_client.get_or_create_collection("agent_memory")
+print("Memory system ready!")
+
 # Voice output setup
 engine = pyttsx3.init()
 engine.setProperty('rate', 175)
@@ -35,11 +51,51 @@ def speak(text):
     engine.say(text)
     engine.runAndWait()
 
+# Save to memory
+def save_memory(user_input, ai_response):
+    timestamp = datetime.now().isoformat()
+    text = f"User: {user_input} | AI: {ai_response}"
+    embedding = embedding_model.encode(text).tolist()
+    memory_collection.add(
+        documents=[text],
+        embeddings=[embedding],
+        ids=[timestamp]
+    )
+
+# Search memory
+def search_memory(query, n=3):
+    count = memory_collection.count()
+    if count == 0:
+        return ""
+    query_embedding = embedding_model.encode(query).tolist()
+    results = memory_collection.query(
+        query_embeddings=[query_embedding],
+        n_results=min(n, count)
+    )
+    if results and results['documents']:
+        return "\n".join(results['documents'][0])
+    return ""
+
+# Wait for wake word
+def wait_for_wake_word():
+    SAMPLERATE = 16000
+    CHUNK = 1280
+    print("Waiting for 'Hey Jarvis'...")
+    with sd.InputStream(samplerate=SAMPLERATE, channels=1, dtype='int16', blocksize=CHUNK) as stream:
+        while True:
+            data, _ = stream.read(CHUNK)
+            audio = np.frombuffer(bytes(data), dtype=np.int16)
+            predictions = wake_word_model.predict(audio)
+            for key, val in predictions.items():
+                if val > 0.3:
+                    print(f"Wake word detected! ({key}: {val:.2f})")
+                    return
+
 # Smart listen
 def listen():
     SAMPLERATE = 16000
     CHUNK = 1024
-    SILENCE_THRESHOLD = 300
+    SILENCE_THRESHOLD = 500
     SILENCE_DURATION = 1.5
     MAX_DURATION = 10
 
@@ -92,15 +148,25 @@ def listen():
         print(f"You said: {text}")
     return text
 
-# AI brain
+# AI brain with memory
 def ask_ai(prompt):
     try:
+        # Search relevant memories
+        memories = search_memory(prompt)
+        system_prompt = """You are a helpful personal AI assistant for Priyansh. 
+Keep responses short and conversational. 
+Never give long explanations unless asked.
+If you know something about the user from past conversations, use it naturally."""
+
+        if memories:
+            system_prompt += f"\n\nRelevant memories from past conversations:\n{memories}"
+
         response = ollama.chat(
-            model="llama3.1:8b",
+            model="gemma3:12b",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful personal AI assistant. Keep responses short and conversational. Never give long explanations unless asked."
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
@@ -108,7 +174,13 @@ def ask_ai(prompt):
                 }
             ]
         )
-        return response['message']['content']
+        reply = response['message']['content']
+
+        # Save to memory in background
+        import threading
+        threading.Thread(target=save_memory, args=(prompt, reply), daemon=True).start()
+
+        return reply
     except Exception as e:
         speak("I had a small hiccup, please repeat that!")
         return ""
@@ -171,6 +243,12 @@ def handle_command(text):
         query = text_lower.replace("search youtube for", "").replace("youtube search", "").strip()
         web_search(query, engine="youtube")
         speak(f"Searching YouTube for {query}!")
+        return True
+
+    # Open YouTube directly
+    if "open youtube" in text_lower:
+        webbrowser.open("https://www.youtube.com")
+        speak("Opening YouTube!")
         return True
 
     # Google search
@@ -270,39 +348,50 @@ def handle_command(text):
 
 # Main loop
 def main():
-    speak("Hello! I am your personal AI agent. How can I help you?")
+    speak("Hello Priyansh! Say Hey Jarvis to activate me!")
 
     while True:
-        user_input = listen()
+        # Wait for wake word
+        wait_for_wake_word()
+        speak("Yes?")
 
-        if not user_input:
-            continue
+        # Keep listening for follow up commands
+        last_command = ""
+        while True:
+            user_input = listen()
 
-        print(f"Processing: {user_input}")
+            if not user_input:
+                break
 
-        # Sleep command
-        if any(word in user_input.lower() for word in ["sleep", "go to sleep", "pause"]):
-            speak("Going to sleep. Say wake up to resume.")
-            while True:
-                wake = listen()
-                if any(word in wake.lower() for word in ["wake up", "wake"]):
-                    speak("I'm back! How can I help you?")
-                    break
-            continue
+            # Handle YouTube follow up
+            if "youtube" in last_command and not handle_command(user_input):
+                web_search(user_input, engine="youtube")
+                speak(f"Searching YouTube for {user_input}!")
+                last_command = ""
+                continue
 
-        # Exit command
-        if any(word in user_input.lower() for word in ["shutdown", "shut down", "exit", "goodbye", "bye"]):
-            speak("Goodbye! Shutting down.")
-            break
+            last_command = user_input.lower()
 
-        # Try PC command first
-        if handle_command(user_input):
-            continue
+            print(f"Processing: {user_input}")
 
-        # Otherwise ask AI
-        response = ask_ai(user_input)
-        if response:
-            speak(response)
+            # Sleep command
+            if any(word in user_input.lower() for word in ["sleep", "go to sleep", "pause"]):
+                speak("Going to sleep. Say Hey Jarvis to wake me up!")
+                break
+
+            # Exit command
+            if any(word in user_input.lower() for word in ["shutdown", "shut down", "exit", "goodbye", "bye"]):
+                speak("Goodbye Priyansh! See you soon!")
+                exit()
+
+            # Try PC command first
+            if handle_command(user_input):
+                continue
+
+            # Otherwise ask AI with memory
+            response = ask_ai(user_input)
+            if response:
+                speak(response)
 
 if __name__ == "__main__":
     main()
