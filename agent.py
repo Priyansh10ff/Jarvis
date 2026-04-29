@@ -162,7 +162,7 @@ If you know something about the user from past conversations, use it naturally."
             system_prompt += f"\n\nRelevant memories from past conversations:\n{memories}"
 
         response = ollama.chat(
-            model="gemma3:12b",
+            model="llama3.1:8b",
             messages=[
                 {
                     "role": "system",
