@@ -303,9 +303,9 @@ def handle_command(text):
 
     # Screenshot
     if "screenshot" in text_lower:
-        screenshot = pyautogui.screenshot()
-        screenshot.save("screenshot.png")
-        speak("Screenshot taken and saved!")
+        path = os.path.join(os.path.expanduser("~"), "Desktop", "screenshot.png")
+        pyautogui.screenshot().save(path)
+        speak("Screenshot saved to your Desktop!")
         return True
 
     # Volume
