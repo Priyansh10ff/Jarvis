@@ -1,0 +1,11 @@
+# Shared defaults. Put machine-specific values in config/settings.local.yaml (gitignored).
+
+assistant:
+  name: Jarvis          # change here to rename the assistant everywhere
+
+user:
+  name: Priyansh
+
+logging:
+  level: INFO
+  file: logs/jarvis.log

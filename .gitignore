@@ -1,12 +1,22 @@
+# Python
 venv/
+.venv/
 __pycache__/
 *.pyc
-*.wav
-*.png
-screenshot.png
+
+# Secrets and personal overrides (API keys live in Windows Credential Manager, never here)
 .env
+config/settings.local.yaml
+
+# Runtime data
+logs/
 *.log
+data/
 memory/
 voice_data/
+*.wav
+*.png
+
+# Models
 *.tflite
 *.onnx
