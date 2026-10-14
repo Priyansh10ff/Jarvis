@@ -6,6 +6,13 @@ assistant:
 user:
   name: Priyansh
 
+startup:
+  greet: true
+  delay_seconds: 8      # wait after logon so the desktop and audio are ready
+
+voice:
+  tts_rate: 175         # words per minute
+
 logging:
   level: INFO
   file: logs/jarvis.log

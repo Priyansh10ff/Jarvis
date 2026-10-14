@@ -1,3 +1,7 @@
-# Phase 0: core config and secrets
+# Core: config and secrets
 PyYAML>=6.0
 keyring>=25.0
+
+# Startup greeting
+pyttsx3>=2.99
+psutil>=7.0
