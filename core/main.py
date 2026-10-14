@@ -24,6 +24,7 @@ def setup_logging(level: str, file: str) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers,
     )
+    logging.getLogger("comtypes").setLevel(logging.WARNING)  # silence pyttsx3's COM cache noise
 
 
 def main(startup: bool = False) -> None:
