@@ -22,7 +22,6 @@ wake:
 awake:
   followup_seconds: 8        # keep listening this long after a reply, no wake word needed
   sleep_phrases: ["go to sleep", "sleep", "that's all", "stop listening", "never mind"]
-  echo_transcript: true      # say back what was heard (testing until the brain exists)
 
 listen:
   start_timeout_seconds: 5   # give up if you don't start talking within this time
@@ -39,3 +38,18 @@ stt:
 logging:
   level: INFO
   file: logs/jarvis.log
+
+brain:
+  order: [groq, claude, local]   # tried in this order; missing keys or errors fall through
+  max_tokens: 300
+  timeout_seconds: 20
+  history_turns: 10              # past exchanges kept for follow-ups
+  history_reset_minutes: 10      # forget the conversation after this long idle
+  providers:
+    groq:
+      model: llama-3.3-70b-versatile
+    claude:
+      model: claude-haiku-5-5    # claude-sonnet-5-5 for harder questions
+    local:
+      model: llama3.1:8b         # any model pulled in Ollama
+      base_url: http://localhost:11434/v1

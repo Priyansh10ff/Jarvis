@@ -11,6 +11,7 @@ import random
 import re
 from enum import Enum
 
+from brain.conversation import Conversation
 from core.config import Settings
 from voice.audio import Microphone
 from voice.recorder import Recorder
@@ -59,7 +60,7 @@ class Assistant:
         )
         self.acks = settings.get("wake.acknowledgements") or ["Yes?"]
         self.sleep_phrases = {_normalize(p) for p in settings.get("awake.sleep_phrases") or []}
-        self.echo = bool(settings.get("awake.echo_transcript", True))
+        self.brain = Conversation(settings)
         self.state = State.SLEEPING
 
     def _set(self, state: State) -> None:
@@ -72,8 +73,8 @@ class Assistant:
         mic.flush()  # don't hear ourselves
 
     def handle(self, text: str) -> str | None:
-        """Turn what was heard into a reply. The brain replaces this next."""
-        return f"I heard: {text}" if self.echo else None
+        """Turn what was heard into a spoken reply."""
+        return self.brain.reply(text)
 
     def _conversation(self, mic: Microphone) -> None:
         self._set(State.AWAKE)

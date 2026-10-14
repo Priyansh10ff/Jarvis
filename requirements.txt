@@ -18,3 +18,7 @@ webrtcvad-wheels>=2.0.14
 # NVIDIA GPU runtime for faster-whisper (skip on CPU-only machines)
 nvidia-cublas-cu12
 nvidia-cudnn-cu12>=9,<10
+
+# Brain: Groq and Ollama speak the OpenAI API; Claude uses Anthropic's SDK
+openai>=1.50
+anthropic>=0.40
