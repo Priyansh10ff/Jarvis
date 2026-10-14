@@ -41,16 +41,28 @@ def main(startup: bool = False) -> None:
     for name in KNOWN:
         log.info("key %-10s %s", name, "ok" if has_secret(name) else "missing")
 
+    from voice.tts import Speaker
+
+    speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)))
+
     if settings.get("startup.greet", True):
         text = build_greeting(settings.user_name, settings.assistant_name)
         try:
-            from voice.tts import Speaker
-
-            Speaker(rate=int(settings.get("voice.tts_rate", 175))).say(text)
+            speaker.say(text)
         except Exception:
             log.exception("Greeting failed; text was: %s", text)
 
     log.info("%s core online for %s", settings.assistant_name, settings.user_name)
+
+    from core.state import Assistant
+
+    try:
+        Assistant(settings, speaker).run()
+    except KeyboardInterrupt:
+        log.info("stopped by user")
+    except Exception:
+        log.exception("assistant loop crashed")
+        raise
 
 
 if __name__ == "__main__":

@@ -5,3 +5,8 @@ keyring>=25.0
 # Startup greeting
 pyttsx3>=2.99
 psutil>=7.0
+
+# Wake word
+numpy>=1.26
+sounddevice>=0.5
+openwakeword>=0.6.0
