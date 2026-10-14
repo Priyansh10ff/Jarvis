@@ -1,12 +1,20 @@
-"""Entry point: python -m core.main"""
+"""Entry point: python -m core.main
+
+Threads:
+    main   Qt event loop (typing bar, hotkey)
+    voice  greeting, wake word, speech in/out
+Both share one brain (Conversation), which is thread-safe.
+"""
 from __future__ import annotations
 
 import logging
+import signal
 import sys
+import threading
 import time
 
 from core import single_instance
-from core.config import ROOT, load_settings
+from core.config import ROOT, Settings, load_settings
 from core.greeting import build_greeting
 from core.secrets import KNOWN, has_secret
 
@@ -27,6 +35,29 @@ def setup_logging(level: str, file: str) -> None:
     logging.getLogger("comtypes").setLevel(logging.WARNING)  # silence pyttsx3's COM cache noise
 
 
+def run_voice(settings: Settings, brain) -> None:
+    """Greeting + wake word loop. Failures here never take down the typing bar."""
+    try:
+        import pythoncom
+
+        pythoncom.CoInitialize()  # speech engine uses COM on this thread
+    except ImportError:
+        pass
+
+    try:
+        from voice.tts import Speaker
+
+        speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)))
+        if settings.get("startup.greet", True):
+            speaker.say(build_greeting(settings.user_name, settings.assistant_name))
+
+        from core.state import Assistant
+
+        Assistant(settings, speaker, brain).run()
+    except Exception:
+        log.exception("voice stopped; the typing bar still works")
+
+
 def main(startup: bool = False) -> None:
     settings = load_settings()
     setup_logging(settings.get("logging.level", "INFO"), settings.get("logging.file", "logs/jarvis.log"))
@@ -41,28 +72,36 @@ def main(startup: bool = False) -> None:
     for name in KNOWN:
         log.info("key %-10s %s", name, "ok" if has_secret(name) else "missing")
 
-    from voice.tts import Speaker
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication
 
-    speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)))
+    from brain.conversation import Conversation
+    from ui.hotkey import GlobalHotkey
+    from ui.typing_bar import TypingBar
 
-    if settings.get("startup.greet", True):
-        text = build_greeting(settings.user_name, settings.assistant_name)
-        try:
-            speaker.say(text)
-        except Exception:
-            log.exception("Greeting failed; text was: %s", text)
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
 
-    log.info("%s core online for %s", settings.assistant_name, settings.user_name)
+    brain = Conversation(settings)
 
-    from core.state import Assistant
+    bar = TypingBar(settings, brain)
+    hotkey = GlobalHotkey(settings.get("typing.hotkey", "ctrl+alt+j"))
+    hotkey.pressed.connect(bar.toggle)
+    hotkey.start()
 
-    try:
-        Assistant(settings, speaker).run()
-    except KeyboardInterrupt:
-        log.info("stopped by user")
-    except Exception:
-        log.exception("assistant loop crashed")
-        raise
+    threading.Thread(target=run_voice, args=(settings, brain), name="voice", daemon=True).start()
+
+    # Let Ctrl+C in the console stop the Qt loop.
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    tick = QTimer()
+    tick.timeout.connect(lambda: None)
+    tick.start(300)
+
+    log.info("%s online for %s", settings.assistant_name, settings.user_name)
+    app.exec()
+
+    hotkey.stop()
+    log.info("stopped")
 
 
 if __name__ == "__main__":

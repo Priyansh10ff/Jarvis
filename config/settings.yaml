@@ -54,3 +54,7 @@ brain:
     local:
       model: llama3.1:8b         # any model pulled in Ollama
       base_url: http://localhost:11434/v1
+
+typing:
+  hotkey: ctrl+alt+j          # opens the typing bar; modifiers: ctrl, alt, shift, win
+  hide_on_focus_loss: true

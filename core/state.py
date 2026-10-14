@@ -32,7 +32,7 @@ def _normalize(text: str) -> str:
 
 
 class Assistant:
-    def __init__(self, settings: Settings, speaker: Speaker) -> None:
+    def __init__(self, settings: Settings, speaker: Speaker, brain: Conversation) -> None:
         self.settings = settings
         self.speaker = speaker
         self.wake = WakeWord(
@@ -60,7 +60,7 @@ class Assistant:
         )
         self.acks = settings.get("wake.acknowledgements") or ["Yes?"]
         self.sleep_phrases = {_normalize(p) for p in settings.get("awake.sleep_phrases") or []}
-        self.brain = Conversation(settings)
+        self.brain = brain
         self.state = State.SLEEPING
 
     def _set(self, state: State) -> None:

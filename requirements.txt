@@ -25,3 +25,6 @@ anthropic>=0.40
 
 # PC tools
 pillow>=10.0
+
+# Typing bar
+PyQt6>=6.7

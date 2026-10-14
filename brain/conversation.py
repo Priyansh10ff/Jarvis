@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from datetime import datetime
 
@@ -61,6 +62,7 @@ class Conversation:
         self.reset_after = float(settings.get("brain.history_reset_minutes", 10)) * 60
         self.history: list[Message] = []
         self._last = 0.0
+        self._lock = threading.Lock()  # voice and typing bar share this brain
         self.tools = list(REGISTRY.values())
         self.pending: tuple[str, dict[str, Any], str] | None = None  # (tool, args, question)
         log.info("models available: %s", ", ".join(self.router.available()) or "none")
@@ -96,6 +98,10 @@ class Conversation:
         return "Cancelled."
 
     def reply(self, text: str) -> str:
+        with self._lock:
+            return self._reply(text)
+
+    def _reply(self, text: str) -> str:
         if self.pending:
             return self._resolve_pending(text)
 
