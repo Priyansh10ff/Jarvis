@@ -43,6 +43,7 @@ brain:
   order: [groq, claude, local]   # tried in this order; missing keys or errors fall through
   max_tokens: 300
   timeout_seconds: 20
+  max_tool_steps: 5              # tool calls allowed per request
   history_turns: 10              # past exchanges kept for follow-ups
   history_reset_minutes: 10      # forget the conversation after this long idle
   providers:

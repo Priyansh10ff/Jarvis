@@ -6,9 +6,13 @@ import re
 import time
 from datetime import datetime
 
+from typing import Any
+
+import tools.system  # noqa: F401  registers the PC tools
 from brain.providers import Message
 from brain.router import NoModelAvailable, Router
 from core.config import Settings
+from tools.registry import REGISTRY, run_tool
 
 log = logging.getLogger("jarvis.brain")
 
@@ -20,6 +24,7 @@ PROVIDER_WORDS = {
     "ollama": "local",
     "offline": "local",
 }
+YES = {"yes", "yeah", "yep", "yes please", "confirm", "do it", "go ahead", "haan", "ha"}
 SWITCH = re.compile(r"^(?:please\s+)?(?:use|switch to|change to)\s+(?:the\s+)?(\w+)(?:\s+model)?[.!]?$", re.I)
 
 
@@ -28,12 +33,15 @@ def _system_prompt(settings: Settings) -> str:
     return (
         f"You are {settings.assistant_name}, a personal voice assistant running on "
         f"{settings.user_name}'s Windows PC. It is {now}.\n"
+        "Use your tools to act on the PC when asked (open apps and websites, search, "
+        "volume, media, screenshots, lock, power, system status). Call a tool instead "
+        "of describing how to do something. If no tool fits, say you can't do that yet.\n"
         "Your replies are spoken aloud, so:\n"
-        "- Answer in one to three short sentences unless asked for detail.\n"
+        "- After acting, confirm in a few words, e.g. 'Opening Spotify.'\n"
+        "- Otherwise answer in one to three short sentences unless asked for detail.\n"
         "- No markdown, lists, code blocks, emojis or URLs.\n"
         "- Reply in the language the user speaks (English or Hinglish).\n"
-        "You cannot control the computer yet. If asked to open apps, files or websites, "
-        "say that ability is coming soon instead of pretending you did it."
+        "- Never claim you did something unless a tool result says it succeeded."
     )
 
 
@@ -53,6 +61,8 @@ class Conversation:
         self.reset_after = float(settings.get("brain.history_reset_minutes", 10)) * 60
         self.history: list[Message] = []
         self._last = 0.0
+        self.tools = list(REGISTRY.values())
+        self.pending: tuple[str, dict[str, Any], str] | None = None  # (tool, args, question)
         log.info("models available: %s", ", ".join(self.router.available()) or "none")
 
     def _switch(self, text: str) -> str | None:
@@ -67,7 +77,28 @@ class Conversation:
         self.router.prefer(target)
         return f"Switched to {'the local model' if target == 'local' else target.capitalize()}."
 
+    def _execute(self, name: str, args: dict[str, Any]) -> str:
+        """Run a tool for the model. Confirm-level tools are parked, not run."""
+        tool_ = REGISTRY.get(name)
+        if tool_ and tool_.level == "confirm":
+            what = (tool_.confirm_prompt or name).format(**args) if args else (tool_.confirm_prompt or name)
+            self.pending = (name, args, f"{what[0].upper()}{what[1:]}? Say yes to confirm.")
+            return "Not run yet: waiting for the user to say yes. Ask them to confirm."
+        return run_tool(name, args)
+
+    def _resolve_pending(self, text: str) -> str:
+        name, args, _ = self.pending  # type: ignore[misc]
+        self.pending = None
+        cleaned = re.sub(r"[^a-z ]", "", text.lower()).strip()
+        if cleaned in YES:
+            result = run_tool(name, args)
+            return result if not result.startswith("Error") else f"That failed. {result[7:]}"
+        return "Cancelled."
+
     def reply(self, text: str) -> str:
+        if self.pending:
+            return self._resolve_pending(text)
+
         switched = self._switch(text)
         if switched:
             return switched
@@ -79,12 +110,14 @@ class Conversation:
 
         self.history.append({"role": "user", "content": text})
         try:
-            answer, _ = self.router.chat(_system_prompt(self.settings), self.history)
+            answer, _ = self.router.run(_system_prompt(self.settings), self.history, self.tools, self._execute)
         except NoModelAvailable:
             self.history.pop()
             return "I can't reach any AI model right now. Add an API key or start Ollama."
 
         answer = speakable(answer)
+        if self.pending:  # the code asks for confirmation, not the model
+            answer = self.pending[2]
         self.history.append({"role": "assistant", "content": answer})
         self.history = self.history[-2 * self.max_turns :]
         return answer

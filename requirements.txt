@@ -22,3 +22,6 @@ nvidia-cudnn-cu12>=9,<10
 # Brain: Groq and Ollama speak the OpenAI API; Claude uses Anthropic's SDK
 openai>=1.50
 anthropic>=0.40
+
+# PC tools
+pillow>=10.0

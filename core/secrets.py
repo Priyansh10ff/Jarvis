@@ -18,7 +18,10 @@ KNOWN = ("groq", "anthropic")
 
 
 def get_secret(name: str) -> str | None:
-    return keyring.get_password(SERVICE, name)
+    try:
+        return keyring.get_password(SERVICE, name)
+    except Exception:  # no keychain backend available
+        return None
 
 
 def has_secret(name: str) -> bool:

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
-from brain.providers import Claude, Message, OpenAICompatible, Provider
+from brain.providers import Claude, Execute, Message, OpenAICompatible, Provider
 from core.config import Settings
 from core.secrets import get_secret
+from tools.registry import Tool
 
 log = logging.getLogger("jarvis.brain")
 
@@ -39,6 +41,7 @@ class Router:
     def __init__(self, settings: Settings) -> None:
         self.order: list[str] = list(settings.get("brain.order") or ["groq", "claude", "local"])
         self.max_tokens = int(settings.get("brain.max_tokens", 300))
+        self.max_steps = int(settings.get("brain.max_tool_steps", 5))
         self.providers: dict[str, Provider] = {}
         for name in self.order:
             provider = _build(name, settings)
@@ -54,7 +57,7 @@ class Router:
     def prefer(self, name: str | None) -> None:
         self.preferred = name
 
-    def chat(self, system: str, messages: list[Message]) -> tuple[str, str]:
+    def run(self, system: str, messages: list[Message], tools: list[Tool], execute: Execute) -> tuple[str, str]:
         """Return (reply, provider name). Raises NoModelAvailable if all fail."""
         names = [n for n in self.order if n in self.providers]
         if self.preferred in names:
@@ -63,13 +66,21 @@ class Router:
 
         for name in names:
             provider = self.providers[name]
+            calls = 0
+
+            def counted(tool_name: str, args: dict[str, Any]) -> str:
+                nonlocal calls
+                calls += 1
+                return execute(tool_name, args)
+
             t0 = time.monotonic()
             try:
-                reply = provider.chat(system, messages, self.max_tokens)
+                reply = provider.run(system, messages, tools, counted, self.max_tokens, self.max_steps)
             except Exception as e:
                 log.warning("%s failed: %s", name, e)
+                if calls:  # never repeat actions on another model
+                    return "Done, but I lost the connection before I could confirm.", name
                 continue
-            log.info("%s/%s replied in %.0f ms", name, provider.model, (time.monotonic() - t0) * 1000)
-            if reply:
-                return reply, name
+            log.info("%s/%s replied in %.0f ms (%d tool calls)", name, provider.model, (time.monotonic() - t0) * 1000, calls)
+            return reply or "Done.", name
         raise NoModelAvailable("No model answered")
