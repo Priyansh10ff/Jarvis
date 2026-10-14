@@ -1,7 +1,7 @@
 """Entry point: python -m core.main
 
 Threads:
-    main   Qt event loop (typing bar, hotkey)
+    main   Qt event loop (tray, typing bar, hotkeys)
     voice  greeting, wake word, speech in/out
 Both share one brain (Conversation), which is thread-safe.
 """
@@ -35,7 +35,7 @@ def setup_logging(level: str, file: str) -> None:
     logging.getLogger("comtypes").setLevel(logging.WARNING)  # silence pyttsx3's COM cache noise
 
 
-def run_voice(settings: Settings, brain) -> None:
+def run_voice(settings: Settings, brain, bridge) -> None:
     """Greeting + wake word loop. Failures here never take down the typing bar."""
     try:
         import pythoncom
@@ -53,9 +53,13 @@ def run_voice(settings: Settings, brain) -> None:
 
         from core.state import Assistant
 
-        Assistant(settings, speaker, brain).run()
+        assistant = Assistant(settings, speaker, brain, on_state=bridge.state_changed.emit)
+        bridge.assistant = assistant
+        assistant.run()
     except Exception:
         log.exception("voice stopped; the typing bar still works")
+        bridge.assistant = None
+        bridge.state_changed.emit("voice off")
 
 
 def main(startup: bool = False) -> None:
@@ -77,6 +81,7 @@ def main(startup: bool = False) -> None:
 
     from brain.conversation import Conversation
     from ui.hotkey import GlobalHotkey
+    from ui.tray import Tray, VoiceBridge
     from ui.typing_bar import TypingBar
 
     app = QApplication(sys.argv)
@@ -85,11 +90,18 @@ def main(startup: bool = False) -> None:
     brain = Conversation(settings)
 
     bar = TypingBar(settings, brain)
+    bridge = VoiceBridge()
+    tray = Tray(settings, brain, bridge, open_bar=bar.open)
+    tray.show()
+
     hotkey = GlobalHotkey(settings.get("typing.hotkey", "ctrl+alt+j"))
     hotkey.pressed.connect(bar.toggle)
     hotkey.start()
+    stop_key = GlobalHotkey(settings.get("typing.stop_hotkey", "ctrl+alt+k"))
+    stop_key.pressed.connect(tray.kill_switch)
+    stop_key.start()
 
-    threading.Thread(target=run_voice, args=(settings, brain), name="voice", daemon=True).start()
+    threading.Thread(target=run_voice, args=(settings, brain, bridge), name="voice", daemon=True).start()
 
     # Let Ctrl+C in the console stop the Qt loop.
     signal.signal(signal.SIGINT, lambda *_: app.quit())
@@ -101,6 +113,8 @@ def main(startup: bool = False) -> None:
     app.exec()
 
     hotkey.stop()
+    stop_key.stop()
+    tray.hide()
     log.info("stopped")
 
 

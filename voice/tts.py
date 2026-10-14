@@ -17,3 +17,10 @@ class Speaker:
         log.info("say: %s", text)
         self._engine.say(text)
         self._engine.runAndWait()
+
+    def stop(self) -> None:
+        """Cut off speech (called from the UI thread by the kill switch)."""
+        try:
+            self._engine.stop()
+        except Exception:
+            log.debug("tts stop failed", exc_info=True)

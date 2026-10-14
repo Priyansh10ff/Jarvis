@@ -21,7 +21,7 @@ wake:
 
 awake:
   followup_seconds: 8        # keep listening this long after a reply, no wake word needed
-  sleep_phrases: ["go to sleep", "sleep", "that's all", "stop listening", "never mind"]
+  sleep_phrases: ["go to sleep", "sleep", "that's all", "stop listening", "never mind", "stop", "jarvis stop"]
 
 listen:
   start_timeout_seconds: 5   # give up if you don't start talking within this time
@@ -57,4 +57,5 @@ brain:
 
 typing:
   hotkey: ctrl+alt+j          # opens the typing bar; modifiers: ctrl, alt, shift, win
+  stop_hotkey: ctrl+alt+k     # kill switch: stop talking, cancel pending action, sleep
   hide_on_focus_loss: true

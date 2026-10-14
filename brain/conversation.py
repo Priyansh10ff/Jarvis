@@ -97,6 +97,9 @@ class Conversation:
             return result if not result.startswith("Error") else f"That failed. {result[7:]}"
         return "Cancelled."
 
+    def cancel_pending(self) -> None:
+        self.pending = None
+
     def reply(self, text: str) -> str:
         with self._lock:
             return self._reply(text)

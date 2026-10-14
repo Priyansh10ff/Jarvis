@@ -42,9 +42,13 @@ def parse(combo: str) -> tuple[int, int]:
 class GlobalHotkey(QThread):
     pressed = pyqtSignal()
 
+    _next_id = 1
+
     def __init__(self, combo: str) -> None:
         super().__init__()
         self.combo = combo
+        self.hotkey_id = GlobalHotkey._next_id
+        GlobalHotkey._next_id += 1
         self._thread_id = 0
 
     def run(self) -> None:
@@ -58,15 +62,15 @@ class GlobalHotkey(QThread):
         except ValueError as e:
             log.error("bad hotkey '%s': %s", self.combo, e)
             return
-        if not user32.RegisterHotKey(None, 1, mods, vk):
-            log.error("hotkey %s is already used by another app; change typing.hotkey", self.combo)
+        if not user32.RegisterHotKey(None, self.hotkey_id, mods, vk):
+            log.error("hotkey %s is already used by another app; change it in settings.yaml", self.combo)
             return
-        log.info("typing bar hotkey: %s", self.combo)
+        log.info("hotkey registered: %s", self.combo)
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             if msg.message == WM_HOTKEY:
                 self.pressed.emit()
-        user32.UnregisterHotKey(None, 1)
+        user32.UnregisterHotKey(None, self.hotkey_id)
 
     def stop(self) -> None:
         if self._thread_id:

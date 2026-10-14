@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 import random
 import re
+import threading
 from enum import Enum
+from typing import Callable
 
 from brain.conversation import Conversation
 from core.config import Settings
@@ -25,6 +27,7 @@ log = logging.getLogger("jarvis.state")
 class State(Enum):
     SLEEPING = "sleeping"
     AWAKE = "awake"
+    PAUSED = "paused"
 
 
 def _normalize(text: str) -> str:
@@ -32,8 +35,17 @@ def _normalize(text: str) -> str:
 
 
 class Assistant:
-    def __init__(self, settings: Settings, speaker: Speaker, brain: Conversation) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        speaker: Speaker,
+        brain: Conversation,
+        on_state: Callable[[str], None] = lambda _s: None,
+    ) -> None:
         self.settings = settings
+        self.on_state = on_state
+        self._paused = threading.Event()
+        self._interrupt = threading.Event()
         self.speaker = speaker
         self.wake = WakeWord(
             model=settings.get("wake.model", "hey_jarvis"),
@@ -67,8 +79,29 @@ class Assistant:
         if state != self.state:
             log.info("state: %s -> %s", self.state.value, state.value)
             self.state = state
+            self.on_state(state.value)
+
+    # ── controls, safe to call from the UI thread ────────────────────────────
+    def pause(self) -> None:
+        self._paused.set()
+        self.interrupt()
+
+    def resume(self) -> None:
+        self._paused.clear()
+
+    @property
+    def paused(self) -> bool:
+        return self._paused.is_set()
+
+    def interrupt(self) -> None:
+        """Kill switch: stop talking, drop any pending action, go back to sleep."""
+        self._interrupt.set()
+        self.speaker.stop()
+        self.brain.cancel_pending()
 
     def _say(self, mic: Microphone, text: str) -> None:
+        if self._interrupt.is_set():
+            return
         self.speaker.say(text)
         mic.flush()  # don't hear ourselves
 
@@ -77,13 +110,15 @@ class Assistant:
         return self.brain.reply(text)
 
     def _conversation(self, mic: Microphone) -> None:
+        self._interrupt.clear()
         self._set(State.AWAKE)
         self._say(mic, random.choice(self.acks))
         recorder = self.first_listen
+        stop = self._interrupt.is_set
 
-        while True:
-            audio = recorder.record(mic)
-            if audio is None:
+        while not stop():
+            audio = recorder.record(mic, should_stop=stop)
+            if audio is None or stop():
                 break
             text = self.stt.transcribe(audio)
             if not text:
@@ -97,12 +132,23 @@ class Assistant:
                 self._say(mic, reply)
             recorder = self.followup_listen
 
+        if stop():
+            log.info("interrupted")
+        mic.flush()
         self.wake.reset()
-        self._set(State.SLEEPING)
+        self._set(State.PAUSED if self.paused else State.SLEEPING)
 
     def run(self) -> None:
         log.info("listening for the wake word")
+        self.on_state(self.state.value)
         with Microphone() as mic:
             while True:
-                if self.wake.detect(mic.read()):
+                frame = mic.read()  # keep draining the mic even while paused
+                if self.paused:
+                    self._set(State.PAUSED)
+                    continue
+                if self.state is State.PAUSED:
+                    self.wake.reset()
+                    self._set(State.SLEEPING)
+                if self.wake.detect(frame):
                     self._conversation(mic)
