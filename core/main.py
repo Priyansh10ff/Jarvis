@@ -27,6 +27,10 @@ def setup_logging(level: str, file: str) -> None:
     handlers: list[logging.Handler] = [logging.FileHandler(log_path, encoding="utf-8")]
     if sys.stderr is not None:  # pythonw has no console
         handlers.append(logging.StreamHandler())
+    from security.redact import RedactingFilter
+
+    for handler in handlers:
+        handler.addFilter(RedactingFilter())  # secrets never reach the log file
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -72,6 +76,10 @@ def main(startup: bool = False) -> None:
 
     if startup:
         time.sleep(float(settings.get("startup.delay_seconds", 0)))
+
+    from security import audit
+
+    audit.configure(ROOT / settings.get("security.audit_file", "logs/audit.jsonl"))
 
     for name in KNOWN:
         log.info("key %-10s %s", name, "ok" if has_secret(name) else "missing")

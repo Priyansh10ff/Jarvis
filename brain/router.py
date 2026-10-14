@@ -8,6 +8,7 @@ from typing import Any
 from brain.providers import Claude, Execute, Message, OpenAICompatible, Provider
 from core.config import Settings
 from core.secrets import get_secret
+from security.redact import redact
 from tools.registry import Tool
 
 log = logging.getLogger("jarvis.brain")
@@ -50,6 +51,7 @@ class Router:
             else:
                 log.info("provider %s unavailable (no key or model)", name)
         self.preferred: str | None = None
+        self.redact_cloud = bool(settings.get("security.redact_cloud", True))
 
     def available(self) -> list[str]:
         return list(self.providers)
@@ -73,9 +75,13 @@ class Router:
                 calls += 1
                 return execute(tool_name, args)
 
+            outbound = messages
+            if name != "local" and self.redact_cloud:  # nothing secret leaves the PC
+                outbound = [{**m, "content": redact(m["content"])} for m in messages]
+
             t0 = time.monotonic()
             try:
-                reply = provider.run(system, messages, tools, counted, self.max_tokens, self.max_steps)
+                reply = provider.run(system, outbound, tools, counted, self.max_tokens, self.max_steps)
             except Exception as e:
                 log.warning("%s failed: %s", name, e)
                 if calls:  # never repeat actions on another model

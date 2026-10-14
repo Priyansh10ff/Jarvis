@@ -59,3 +59,10 @@ typing:
   hotkey: ctrl+alt+j          # opens the typing bar; modifiers: ctrl, alt, shift, win
   stop_hotkey: ctrl+alt+k     # kill switch: stop talking, cancel pending action, sleep
   hide_on_focus_loss: true
+
+security:
+  max_tool_calls_per_minute: 20  # stops a runaway model loop
+  redact_cloud: true             # scrub keys, card numbers, passwords before text goes to Groq/Claude
+  blocked_domains: []            # e.g. ["example-bank.com"]; Jarvis will refuse to open them
+  levels: {}                     # make a tool stricter, e.g. {screenshot: confirm, open_website: deny}
+  audit_file: logs/audit.jsonl

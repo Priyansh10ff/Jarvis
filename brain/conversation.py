@@ -13,6 +13,8 @@ import tools.system  # noqa: F401  registers the PC tools
 from brain.providers import Message
 from brain.router import NoModelAvailable, Router
 from core.config import Settings
+from security import audit
+from security.policy import Policy
 from tools.registry import REGISTRY, run_tool
 
 log = logging.getLogger("jarvis.brain")
@@ -64,6 +66,7 @@ class Conversation:
         self._last = 0.0
         self._lock = threading.Lock()  # voice and typing bar share this brain
         self.tools = list(REGISTRY.values())
+        self.policy = Policy(settings)
         self.pending: tuple[str, dict[str, Any], str] | None = None  # (tool, args, question)
         log.info("models available: %s", ", ".join(self.router.available()) or "none")
 
@@ -80,13 +83,25 @@ class Conversation:
         return f"Switched to {'the local model' if target == 'local' else target.capitalize()}."
 
     def _execute(self, name: str, args: dict[str, Any]) -> str:
-        """Run a tool for the model. Confirm-level tools are parked, not run."""
-        tool_ = REGISTRY.get(name)
-        if tool_ and tool_.level == "confirm":
-            what = (tool_.confirm_prompt or name).format(**args) if args else (tool_.confirm_prompt or name)
+        """Every tool call from the model goes through the security policy here."""
+        decision = self.policy.check(name, args)
+        if decision.action == "deny":
+            audit.record(name, args, "deny", reason=decision.reason)
+            log.warning("blocked %s: %s", name, decision.reason)
+            return f"Blocked by security policy: {decision.reason}. Tell the user it was blocked."
+        if decision.action == "confirm":
+            tool_ = REGISTRY[name]
+            template = tool_.confirm_prompt or name
+            try:
+                what = template.format(**args)
+            except (KeyError, IndexError):
+                what = template
             self.pending = (name, args, f"{what[0].upper()}{what[1:]}? Say yes to confirm.")
+            audit.record(name, args, "confirm-asked")
             return "Not run yet: waiting for the user to say yes. Ask them to confirm."
-        return run_tool(name, args)
+        result = run_tool(name, args)
+        audit.record(name, args, "allow", result=result)
+        return result
 
     def _resolve_pending(self, text: str) -> str:
         name, args, _ = self.pending  # type: ignore[misc]
@@ -94,7 +109,9 @@ class Conversation:
         cleaned = re.sub(r"[^a-z ]", "", text.lower()).strip()
         if cleaned in YES:
             result = run_tool(name, args)
+            audit.record(name, args, "confirmed", result=result)
             return result if not result.startswith("Error") else f"That failed. {result[7:]}"
+        audit.record(name, args, "cancelled")
         return "Cancelled."
 
     def cancel_pending(self) -> None:
