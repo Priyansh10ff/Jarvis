@@ -1,13 +1,20 @@
-"""Sleep/awake state machine: sleep until the wake word, stay awake until idle."""
+"""Sleep/awake state machine.
+
+SLEEPING: only the wake word runs.
+AWAKE:    record what you say, transcribe it, handle it, then keep listening
+          for a follow-up. Silence or a sleep phrase sends it back to sleep.
+"""
 from __future__ import annotations
 
 import logging
 import random
-import time
+import re
 from enum import Enum
 
 from core.config import Settings
 from voice.audio import Microphone
+from voice.recorder import Recorder
+from voice.stt import Transcriber
 from voice.tts import Speaker
 from voice.wakeword import WakeWord
 
@@ -19,6 +26,10 @@ class State(Enum):
     AWAKE = "awake"
 
 
+def _normalize(text: str) -> str:
+    return re.sub(r"[^a-z' ]", "", text.lower()).strip()
+
+
 class Assistant:
     def __init__(self, settings: Settings, speaker: Speaker) -> None:
         self.settings = settings
@@ -28,34 +39,69 @@ class Assistant:
             threshold=float(settings.get("wake.threshold", 0.5)),
             cooldown=float(settings.get("wake.cooldown_seconds", 2)),
         )
-        self.idle_timeout = float(settings.get("awake.idle_timeout_seconds", 10))
+        self.stt = Transcriber(
+            model=settings.get("stt.model", "large-v3-turbo"),
+            device=settings.get("stt.device", "auto"),
+            language=settings.get("stt.language"),
+            beam_size=int(settings.get("stt.beam_size", 1)),
+        )
+        self.first_listen = Recorder(
+            aggressiveness=int(settings.get("listen.vad_aggressiveness", 2)),
+            start_timeout=float(settings.get("listen.start_timeout_seconds", 5)),
+            end_silence_ms=int(settings.get("listen.end_silence_ms", 800)),
+            max_seconds=float(settings.get("listen.max_seconds", 15)),
+        )
+        self.followup_listen = Recorder(
+            aggressiveness=int(settings.get("listen.vad_aggressiveness", 2)),
+            start_timeout=float(settings.get("awake.followup_seconds", 8)),
+            end_silence_ms=int(settings.get("listen.end_silence_ms", 800)),
+            max_seconds=float(settings.get("listen.max_seconds", 15)),
+        )
         self.acks = settings.get("wake.acknowledgements") or ["Yes?"]
+        self.sleep_phrases = {_normalize(p) for p in settings.get("awake.sleep_phrases") or []}
+        self.echo = bool(settings.get("awake.echo_transcript", True))
         self.state = State.SLEEPING
-        self._awake_until = 0.0
 
     def _set(self, state: State) -> None:
         if state != self.state:
             log.info("state: %s -> %s", self.state.value, state.value)
             self.state = state
 
-    def _wake_up(self, mic: Microphone) -> None:
+    def _say(self, mic: Microphone, text: str) -> None:
+        self.speaker.say(text)
+        mic.flush()  # don't hear ourselves
+
+    def handle(self, text: str) -> str | None:
+        """Turn what was heard into a reply. The brain replaces this next."""
+        return f"I heard: {text}" if self.echo else None
+
+    def _conversation(self, mic: Microphone) -> None:
         self._set(State.AWAKE)
-        self.speaker.say(random.choice(self.acks))
-        mic.flush()          # don't feed our own voice back in
+        self._say(mic, random.choice(self.acks))
+        recorder = self.first_listen
+
+        while True:
+            audio = recorder.record(mic)
+            if audio is None:
+                break
+            text = self.stt.transcribe(audio)
+            if not text:
+                recorder = self.followup_listen
+                continue
+            if _normalize(text) in self.sleep_phrases:
+                self._say(mic, "Going to sleep.")
+                break
+            reply = self.handle(text)
+            if reply:
+                self._say(mic, reply)
+            recorder = self.followup_listen
+
         self.wake.reset()
-        self._awake_until = time.monotonic() + self.idle_timeout
+        self._set(State.SLEEPING)
 
     def run(self) -> None:
         log.info("listening for the wake word")
         with Microphone() as mic:
             while True:
-                frame = mic.read()
-                if self.state is State.SLEEPING:
-                    if self.wake.detect(frame):
-                        self._wake_up(mic)
-                else:
-                    # Speech-to-text plugs in here in the next feature.
-                    if self.wake.detect(frame):
-                        self._wake_up(mic)
-                    elif time.monotonic() >= self._awake_until:
-                        self._set(State.SLEEPING)
+                if self.wake.detect(mic.read()):
+                    self._conversation(mic)

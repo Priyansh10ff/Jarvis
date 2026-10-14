@@ -10,3 +10,11 @@ psutil>=7.0
 numpy>=1.26
 sounddevice>=0.5
 openwakeword>=0.6.0
+
+# Speech to text
+faster-whisper>=1.2
+webrtcvad-wheels>=2.0.14
+
+# NVIDIA GPU runtime for faster-whisper (skip on CPU-only machines)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10

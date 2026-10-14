@@ -20,7 +20,21 @@ wake:
   acknowledgements: ["Yes?", "I'm listening.", "Go ahead."]
 
 awake:
-  idle_timeout_seconds: 10   # go back to sleep after this long with nothing to do
+  followup_seconds: 8        # keep listening this long after a reply, no wake word needed
+  sleep_phrases: ["go to sleep", "sleep", "that's all", "stop listening", "never mind"]
+  echo_transcript: true      # say back what was heard (testing until the brain exists)
+
+listen:
+  start_timeout_seconds: 5   # give up if you don't start talking within this time
+  end_silence_ms: 800        # this much silence ends your sentence
+  max_seconds: 15
+  vad_aggressiveness: 2      # 0-3, higher filters more background noise
+
+stt:
+  model: large-v3-turbo      # or distil-large-v3, small.en for slower PCs
+  device: auto               # auto | cuda | cpu
+  language: null             # null = auto-detect (Hinglish ok), or "en"
+  beam_size: 1               # 1 = fastest, 5 = slightly more accurate
 
 logging:
   level: INFO
