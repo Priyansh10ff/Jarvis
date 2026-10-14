@@ -57,7 +57,9 @@ def run_voice(settings: Settings, brain, bridge) -> None:
 
         from core.state import Assistant
 
-        assistant = Assistant(settings, speaker, brain, on_state=bridge.state_changed.emit)
+        assistant = Assistant(
+            settings, speaker, brain, on_state=bridge.state_changed.emit, on_event=bridge.event.emit
+        )
         bridge.assistant = assistant
         assistant.run()
     except Exception:
@@ -89,6 +91,7 @@ def main(startup: bool = False) -> None:
 
     from brain.conversation import Conversation
     from ui.hotkey import GlobalHotkey
+    from ui.overlay import Overlay
     from ui.tray import Tray, VoiceBridge
     from ui.typing_bar import TypingBar
 
@@ -101,6 +104,10 @@ def main(startup: bool = False) -> None:
     bridge = VoiceBridge()
     tray = Tray(settings, brain, bridge, open_bar=bar.open)
     tray.show()
+    if settings.get("overlay.enabled", True):
+        overlay = Overlay(settings)
+        bridge.state_changed.connect(overlay.on_state)
+        bridge.event.connect(overlay.on_event)
 
     hotkey = GlobalHotkey(settings.get("typing.hotkey", "ctrl+alt+j"))
     hotkey.pressed.connect(bar.toggle)

@@ -66,3 +66,9 @@ security:
   blocked_domains: []            # e.g. ["example-bank.com"]; Jarvis will refuse to open them
   levels: {}                     # make a tool stricter, e.g. {screenshot: confirm, open_website: deny}
   audit_file: logs/audit.jsonl
+
+overlay:
+  enabled: true
+  position: bottom-right   # bottom-right | bottom-center | center
+  size: 220                # orb area in pixels
+  show_captions: true      # show what was heard and the reply under the orb

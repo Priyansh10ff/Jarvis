@@ -34,7 +34,12 @@ class Recorder:
         hits = sum(self.vad.is_speech(s.tobytes(), SAMPLE_RATE) for s in subs)
         return hits * 2 >= len(subs)
 
-    def record(self, mic: Microphone, should_stop: Callable[[], bool] = lambda: False) -> np.ndarray | None:
+    def record(
+        self,
+        mic: Microphone,
+        should_stop: Callable[[], bool] = lambda: False,
+        on_frame: Callable[[np.ndarray], None] | None = None,
+    ) -> np.ndarray | None:
         """Return int16 audio of one utterance, or None if nobody spoke."""
         frame_ms = mic.frame * 1000 // SAMPLE_RATE
         preroll: deque[np.ndarray] = deque(maxlen=max(1, 300 // frame_ms))
@@ -47,6 +52,8 @@ class Recorder:
             if should_stop():
                 return None
             frame = mic.read()
+            if on_frame:
+                on_frame(frame)
             voiced = self._voiced(frame)
 
             if not started:

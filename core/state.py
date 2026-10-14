@@ -11,7 +11,9 @@ import random
 import re
 import threading
 from enum import Enum
-from typing import Callable
+from typing import Any, Callable
+
+import numpy as np
 
 from brain.conversation import Conversation
 from core.config import Settings
@@ -41,9 +43,11 @@ class Assistant:
         speaker: Speaker,
         brain: Conversation,
         on_state: Callable[[str], None] = lambda _s: None,
+        on_event: Callable[[str, Any], None] = lambda _k, _v: None,
     ) -> None:
         self.settings = settings
         self.on_state = on_state
+        self.on_event = on_event  # ("activity", listening|thinking|speaking), ("level", 0-1), ("heard"|"reply", text)
         self._paused = threading.Event()
         self._interrupt = threading.Event()
         self.speaker = speaker
@@ -102,8 +106,14 @@ class Assistant:
     def _say(self, mic: Microphone, text: str) -> None:
         if self._interrupt.is_set():
             return
+        self.on_event("activity", "speaking")
         self.speaker.say(text)
         mic.flush()  # don't hear ourselves
+        self.on_event("activity", "listening")
+
+    def _mic_level(self, frame: np.ndarray) -> None:
+        rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
+        self.on_event("level", min(1.0, rms / 3000.0))
 
     def handle(self, text: str) -> str | None:
         """Turn what was heard into a spoken reply."""
@@ -117,18 +127,22 @@ class Assistant:
         stop = self._interrupt.is_set
 
         while not stop():
-            audio = recorder.record(mic, should_stop=stop)
+            audio = recorder.record(mic, should_stop=stop, on_frame=self._mic_level)
             if audio is None or stop():
                 break
+            self.on_event("activity", "thinking")
             text = self.stt.transcribe(audio)
             if not text:
+                self.on_event("activity", "listening")
                 recorder = self.followup_listen
                 continue
+            self.on_event("heard", text)
             if _normalize(text) in self.sleep_phrases:
                 self._say(mic, "Going to sleep.")
                 break
             reply = self.handle(text)
             if reply:
+                self.on_event("reply", reply)
                 self._say(mic, reply)
             recorder = self.followup_listen
 

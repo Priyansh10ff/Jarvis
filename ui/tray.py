@@ -45,6 +45,7 @@ class VoiceBridge(QObject):
     """Carries voice-thread state to the UI thread."""
 
     state_changed = pyqtSignal(str)
+    event = pyqtSignal(str, object)  # (kind, value) for the overlay
 
     def __init__(self) -> None:
         super().__init__()
