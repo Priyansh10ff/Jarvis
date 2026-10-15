@@ -68,7 +68,7 @@ class Assistant:
         )
         self.stt: Transcriber | None = None
         self._stt_ready = threading.Event()
-        threading.Thread(target=self._load_stt, name="stt-load", daemon=True).start()
+        self._load_stt()  # load fully before going live (no lag on the first command)
         self.first_listen = Recorder(
             aggressiveness=int(settings.get("listen.vad_aggressiveness", 2)),
             start_timeout=float(settings.get("listen.start_timeout_seconds", 5)),
@@ -88,7 +88,7 @@ class Assistant:
 
     def _load_stt(self) -> None:
         s = self.settings
-        log.info("loading speech model (first run downloads ~1.6 GB)")
+        log.info("loading speech model")
         try:
             self.stt = Transcriber(
                 model=s.get("stt.model", "large-v3-turbo"),
@@ -96,6 +96,7 @@ class Assistant:
                 language=s.get("stt.language"),
                 beam_size=int(s.get("stt.beam_size", 1)),
             )
+            self.stt.warm_up()
             self._stt_ready.set()
         except Exception:
             log.exception("speech model failed to load")

@@ -12,6 +12,7 @@ startup:
 
 voice:
   tts_rate: 175         # words per minute
+  voice: female         # female | male | part of a voice name (python -m voice.tts --list)
 
 audio:
   input_device: null    # null = Windows default mic; or a number / part of the name (python -m voice.wakeword --list)
@@ -67,6 +68,7 @@ typing:
   hotkey: ctrl+alt+j          # also opens the bar; modifiers: ctrl, alt, shift, win
   stop_hotkey: ctrl+alt+k     # kill switch: stop talking, cancel pending action, sleep
   hide_on_focus_loss: true
+  speak_replies: true         # also say typed replies out loud
 
 security:
   max_tool_calls_per_minute: 20  # stops a runaway model loop

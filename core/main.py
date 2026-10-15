@@ -40,28 +40,38 @@ def setup_logging(level: str, file: str) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
-def run_voice(settings: Settings, brain, bridge) -> None:
-    """Greeting + wake word loop. Failures here never take down the typing bar."""
+def preload(settings: Settings, brain) -> None:
+    """Things that are slow the first time: app index, cloud connection."""
+    t0 = time.monotonic()
     try:
-        import pythoncom
+        from tools.system import installed_apps
 
-        pythoncom.CoInitialize()  # speech engine uses COM on this thread
-    except ImportError:
-        pass
+        installed_apps()
+    except Exception:
+        log.exception("app index failed")
+    brain.router.warm_up()
+    log.info("tools and models ready in %.1fs", time.monotonic() - t0)
 
+
+def run_voice(settings: Settings, brain, bridge, speaker) -> None:
+    """Load everything, greet, then listen. Failures here never take down the typing bar."""
     try:
-        from voice.tts import Speaker
-
-        speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)))
-        if settings.get("startup.greet", True):
-            speaker.say(build_greeting(settings.user_name, settings.assistant_name))
+        t0 = time.monotonic()
+        bridge.state_changed.emit("loading")
+        warm = threading.Thread(target=preload, args=(settings, brain), name="preload", daemon=True)
+        warm.start()
 
         from core.state import Assistant
 
         assistant = Assistant(
             settings, speaker, brain, on_state=bridge.state_changed.emit, on_event=bridge.event.emit
         )
+        warm.join(timeout=60)
         bridge.assistant = assistant
+        log.info("fully loaded in %.1fs", time.monotonic() - t0)
+
+        if settings.get("startup.greet", True):
+            speaker.say(build_greeting(settings.user_name, settings.assistant_name))
         assistant.run()
     except Exception:
         log.exception("voice stopped; the typing bar still works")
@@ -125,7 +135,13 @@ def main(startup: bool = False) -> None:
     stop_key.pressed.connect(tray.kill_switch)
     stop_key.start()
 
-    threading.Thread(target=run_voice, args=(settings, brain, bridge), name="voice", daemon=True).start()
+    from voice.tts import Speaker
+
+    speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)), voice=settings.get("voice.voice"))
+    if settings.get("typing.speak_replies", True):
+        bar.answered.connect(lambda _q, answer: speaker.say(answer, wait=False))
+
+    threading.Thread(target=run_voice, args=(settings, brain, bridge, speaker), name="voice", daemon=True).start()
 
     # Let Ctrl+C in the console stop the Qt loop.
     signal.signal(signal.SIGINT, lambda *_: app.quit())

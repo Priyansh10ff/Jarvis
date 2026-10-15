@@ -53,6 +53,16 @@ class Transcriber:
             raise RuntimeError(f"Could not load speech model {model}") from last_error
         log.info("speech model %s on %s ready in %.1fs", model, self.device, time.monotonic() - t0)
 
+    def warm_up(self) -> None:
+        """Run one silent inference so the first real command isn't slow."""
+        t0 = time.monotonic()
+        try:
+            segments, _ = self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)
+            list(segments)
+        except Exception:
+            log.debug("warm-up failed", exc_info=True)
+        log.info("speech model warmed up in %.0f ms", (time.monotonic() - t0) * 1000)
+
     def transcribe(self, audio: np.ndarray) -> str:
         t0 = time.monotonic()
         samples = audio.astype(np.float32) / 32768.0

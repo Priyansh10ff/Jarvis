@@ -53,6 +53,18 @@ class Router:
         self.preferred: str | None = None
         self.redact_cloud = bool(settings.get("security.redact_cloud", True))
 
+    def warm_up(self) -> None:
+        """Open connections early (lists models; costs no tokens)."""
+        for name, provider in self.providers.items():
+            client = getattr(provider, "_client", None)
+            if name == "local" or client is None:
+                continue
+            try:
+                client.models.list()
+                log.info("%s connection ready", name)
+            except Exception as e:
+                log.warning("%s warm-up failed: %s", name, e)
+
     def available(self) -> list[str]:
         return list(self.providers)
 
