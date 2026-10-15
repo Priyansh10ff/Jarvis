@@ -15,6 +15,7 @@ log = logging.getLogger("jarvis.tray")
 
 COLORS = {
     "starting": "#5a6472",
+    "loading": "#5a6472",
     "sleeping": "#2f8fb8",
     "awake": "#38d6ff",
     "paused": "#7a7f88",

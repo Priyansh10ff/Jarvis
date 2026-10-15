@@ -36,7 +36,8 @@ def setup_logging(level: str, file: str) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers,
     )
-    logging.getLogger("comtypes").setLevel(logging.WARNING)  # silence pyttsx3's COM cache noise
+    for noisy in ("comtypes", "httpx", "httpx2", "httpcore", "huggingface_hub", "urllib3", "openai", "anthropic"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def run_voice(settings: Settings, brain, bridge) -> None:
@@ -131,6 +132,12 @@ def main(startup: bool = False) -> None:
     stop_key.stop()
     tray.hide()
     log.info("stopped")
+    logging.shutdown()
+    # Model downloads and in-flight requests run in background threads that can keep
+    # Python alive for minutes after Quit. Everything is saved, so exit immediately.
+    import os
+
+    os._exit(0)
 
 
 if __name__ == "__main__":

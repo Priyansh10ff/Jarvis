@@ -71,3 +71,17 @@ class Transcriber:
             text or "<nothing>",
         )
         return text
+
+
+if __name__ == "__main__":
+    # Pre-download and test-load the speech model: python -m voice.stt
+    import sys as _sys
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    _sys.path.insert(0, ".")
+    from core.config import load_settings
+
+    st = load_settings()
+    print("Downloading/loading the speech model. First time is ~1.6 GB, progress bars below.")
+    Transcriber(model=st.get("stt.model", "large-v3-turbo"), device=st.get("stt.device", "auto"))
+    print("Speech model ready.")

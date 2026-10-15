@@ -56,12 +56,9 @@ class Assistant:
             threshold=float(settings.get("wake.threshold", 0.5)),
             cooldown=float(settings.get("wake.cooldown_seconds", 2)),
         )
-        self.stt = Transcriber(
-            model=settings.get("stt.model", "large-v3-turbo"),
-            device=settings.get("stt.device", "auto"),
-            language=settings.get("stt.language"),
-            beam_size=int(settings.get("stt.beam_size", 1)),
-        )
+        self.stt: Transcriber | None = None
+        self._stt_ready = threading.Event()
+        threading.Thread(target=self._load_stt, name="stt-load", daemon=True).start()
         self.first_listen = Recorder(
             aggressiveness=int(settings.get("listen.vad_aggressiveness", 2)),
             start_timeout=float(settings.get("listen.start_timeout_seconds", 5)),
@@ -78,6 +75,20 @@ class Assistant:
         self.sleep_phrases = {_normalize(p) for p in settings.get("awake.sleep_phrases") or []}
         self.brain = brain
         self.state = State.SLEEPING
+
+    def _load_stt(self) -> None:
+        s = self.settings
+        log.info("loading speech model (first run downloads ~1.6 GB)")
+        try:
+            self.stt = Transcriber(
+                model=s.get("stt.model", "large-v3-turbo"),
+                device=s.get("stt.device", "auto"),
+                language=s.get("stt.language"),
+                beam_size=int(s.get("stt.beam_size", 1)),
+            )
+            self._stt_ready.set()
+        except Exception:
+            log.exception("speech model failed to load")
 
     def _set(self, state: State) -> None:
         if state != self.state:
@@ -121,6 +132,11 @@ class Assistant:
 
     def _conversation(self, mic: Microphone) -> None:
         self._interrupt.clear()
+        if not self._stt_ready.is_set():
+            log.info("woke before the speech model was ready")
+            self._say(mic, "I'm still loading my speech model. Use the typing bar for now.")
+            self.wake.reset()
+            return
         self._set(State.AWAKE)
         self._say(mic, random.choice(self.acks))
         recorder = self.first_listen
@@ -131,7 +147,7 @@ class Assistant:
             if audio is None or stop():
                 break
             self.on_event("activity", "thinking")
-            text = self.stt.transcribe(audio)
+            text = self.stt.transcribe(audio)  # type: ignore[union-attr]
             if not text:
                 self.on_event("activity", "listening")
                 recorder = self.followup_listen

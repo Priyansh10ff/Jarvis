@@ -37,7 +37,38 @@ class OpenAICompatible:
         self.model = model
         self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, max_retries=0)
 
+    FALLBACK_MODELS = (
+        "llama-3.3-70b-versatile",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.1-8b-instant",
+    )
+
+    def _pick_available_model(self) -> bool:
+        """Configured model missing or blocked: switch to one this key can use."""
+        try:
+            ids = {m.id for m in self._client.models.list().data}
+        except Exception:
+            return False
+        for candidate in self.FALLBACK_MODELS:
+            if candidate in ids and candidate != self.model:
+                log.warning("%s: model %s unavailable, using %s instead", self.name, self.model, candidate)
+                self.model = candidate
+                return True
+        log.error("%s: none of %s available; models on this key: %s", self.name, self.FALLBACK_MODELS, sorted(ids))
+        return False
+
     def run(self, system, messages, tools, execute, max_tokens, max_steps) -> str:
+        from openai import NotFoundError
+
+        try:
+            return self._run(system, messages, tools, execute, max_tokens, max_steps)
+        except NotFoundError:
+            if self._pick_available_model():
+                return self._run(system, messages, tools, execute, max_tokens, max_steps)
+            raise
+
+    def _run(self, system, messages, tools, execute, max_tokens, max_steps) -> str:
         convo: list[dict[str, Any]] = [{"role": "system", "content": system}, *messages]
         schemas = [t.openai_schema() for t in tools] or None
 

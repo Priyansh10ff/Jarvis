@@ -77,9 +77,25 @@ class TypingBar(QWidget):
         self.move(screen.x() + (screen.width() - self.width()) // 2, screen.y() + screen.height() // 4)
         self.show()
         self.raise_()
+        self._force_foreground()
         self.activateWindow()
         self.input.setFocus()
         self.input.selectAll()
+
+    def _force_foreground(self) -> None:
+        """Windows blocks background apps from taking focus; a synthetic Alt tap lifts that."""
+        import sys
+
+        if sys.platform != "win32":
+            return
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        hwnd = int(self.winId())
+        user32.keybd_event(0x12, 0, 0, 0)  # Alt down
+        user32.keybd_event(0x12, 0, 2, 0)  # Alt up
+        user32.ShowWindow(hwnd, 5)
+        user32.SetForegroundWindow(hwnd)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
