@@ -47,6 +47,13 @@ MESSAGING_APPS = re.compile(
     r"(?i)(whatsapp|telegram|discord|slack|teams|messenger|signal|instagram|claude|chatgpt|gmail|outlook|"
     r"mail|linkedin|twitter|\bx\b|skype|zoom)"
 )
+BROWSER_TOOLS = {"browse", "browser_click", "browser_fill", "browser_press"}
+SENSITIVE_FIELD = re.compile(
+    r"(?i)(password|passcode|\bpin\b|otp|one.time|cvv|cvc|card.?number|expiry|security code|ssn|aadhaar|"
+    r"\bpan\b|account.?number|ifsc|upi)"
+)
+PAYMENT_PAGE = re.compile(r"(?i)(checkout|payment|/pay\b|billing|cart|order)")
+
 DEFAULT_PRIVATE_WINDOWS = ["bitwarden", "1password", "keepass", "lastpass", "dashlane", "credential",
                            "windows security", "password", "authenticator"]
 
@@ -85,6 +92,26 @@ class Policy:
         host = urllib.parse.urlparse(url if "://" in url else "https://" + url).netloc.lower().split(":")[0]
         return any(host == d or host.endswith("." + d) for d in self.blocked_domains)
 
+    def _check_browser_tool(self, name: str, args: dict[str, Any]) -> Decision | None:
+        if name == "browse":
+            target = str(args.get("url_or_query", ""))
+            if "." in target and " " not in target.strip() and self._domain_blocked(target):
+                return Decision("deny", "that site is on the blocked list")
+            return None
+        if name == "browser_fill" and SENSITIVE_FIELD.search(str(args.get("field", ""))):
+            return Decision("deny", "Jarvis never types passwords, card details, OTPs or ID numbers")
+        if name == "browser_click" and RISKY_CLICKS.search(str(args.get("target", ""))):
+            return Decision("confirm")
+        if name == "browser_press" and "enter" in str(args.get("key", "")).lower():
+            try:
+                from tools.browser import current_url
+
+                if PAYMENT_PAGE.search(current_url()):
+                    return Decision("confirm")  # Enter on a checkout page could place an order
+            except Exception:
+                pass
+        return None
+
     def _check_window_tool(self, name: str, args: dict[str, Any]) -> Decision | None:
         try:
             from tools.uia import target_title
@@ -119,6 +146,11 @@ class Policy:
 
         if name == "open_website" and self._domain_blocked(str(args.get("url", ""))):
             return Decision("deny", "that site is on the blocked list")
+
+        if name in BROWSER_TOOLS:
+            decision = self._check_browser_tool(name, args)
+            if decision:
+                return decision
 
         if name in WINDOW_TOOLS:
             decision = self._check_window_tool(name, args)

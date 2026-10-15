@@ -97,3 +97,18 @@ overlay:
   position: bottom-right   # bottom-right | bottom-center | center
   size: 220                # orb area in pixels
   show_captions: true      # show what was heard and the reply under the orb
+
+browser:
+  channel: msedge        # msedge (always installed) or chrome; Jarvis uses its own profile in data/browser-profile
+
+contacts:
+  # Optional. With a number saved, messages open the exact chat (most reliable).
+  # Without one, Jarvis searches the name in your WhatsApp chat list.
+  # Example:
+  # ram:
+  #   whatsapp: "+91 98765 43210"
+  #   aliases: [ram bhai, ramu]
+  # mom:
+  #   whatsapp: "+91 90000 00000"
+  #   aliases: [mummy, maa]
+  {}

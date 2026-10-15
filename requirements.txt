@@ -26,6 +26,7 @@ anthropic>=0.40
 # PC tools
 pillow>=10.0
 uiautomation>=2.0.20   # control apps by their buttons and fields
+playwright>=1.48       # browser control (uses installed Edge/Chrome)
 
 # Typing bar
 PyQt6>=6.7
