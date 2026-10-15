@@ -18,7 +18,9 @@ audio:
   gain: 1.0             # raise to 2-3 if your mic is quiet
 
 wake:
-  model: hey_jarvis     # pretrained openWakeWord model; custom name needs a trained model
+  mode: phrase          # phrase = say "hey" (speech-to-text); model = "hey jarvis" wake word model
+  phrases: ["hey", "hay", "hei"]   # first word that wakes it; "hey, open spotify" works in one go
+  model: hey_jarvis     # used when mode: model
   threshold: 0.35       # 0-1, higher = fewer false wakes, lower = easier to trigger
   cooldown_seconds: 2   # ignore repeat triggers right after a wake
   acknowledgements: ["Yes?", "I'm listening.", "Go ahead."]
