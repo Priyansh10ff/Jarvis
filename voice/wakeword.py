@@ -45,16 +45,43 @@ class WakeWord:
 
 
 def _demo() -> None:
-    from voice.audio import Microphone
+    """Live check: python -m voice.wakeword   (add --list to see microphones)"""
+    import sys
+
+    from core.config import load_settings
+    from voice.audio import Microphone, input_devices
+
+    if "--list" in sys.argv:
+        for index, name in input_devices():
+            print(f"{index:>3}  {name}")
+        print("\nSet one in config/settings.yaml:  audio.input_device: <number or part of the name>")
+        return
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    wake = WakeWord()
-    print("Say 'Hey Jarvis'. Scores above 0.10 are shown. Ctrl+C to stop.")
-    with Microphone() as mic:
+    st = load_settings()
+    threshold = float(st.get("wake.threshold", 0.5))
+    wake = WakeWord(model=st.get("wake.model", "hey_jarvis"), threshold=threshold)
+    mic = Microphone(device=st.get("audio.input_device"), gain=float(st.get("audio.gain", 1.0)))
+    print(f"\nMic: {mic.device_name}   threshold: {threshold}")
+    print("Say 'Hey Jarvis' a few times. The bar is your mic volume. Ctrl+C to stop.\n")
+
+    peak_level = peak_score = 0.0
+    frames = 0
+    with mic:
         while True:
-            hit = wake.detect(mic.read())
-            if wake.last_score > 0.1 or hit:
-                print(f"score {wake.last_score:.2f}{'  <- WAKE' if hit else ''}")
+            frame = mic.read()
+            hit = wake.detect(frame)
+            level = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
+            peak_level = max(peak_level, level)
+            peak_score = max(peak_score, wake.last_score)
+            frames += 1
+            if hit:
+                print(f"  >>> WAKE  (score {wake.last_score:.2f})")
+            if frames % 6 == 0:  # about twice a second
+                bar = "#" * min(40, int(peak_level / 150))
+                hint = "  (too quiet?)" if peak_level < 300 else ""
+                print(f"mic {int(peak_level):>5} |{bar:<40}| score {peak_score:.2f}{hint}")
+                peak_level = peak_score = 0.0
 
 
 if __name__ == "__main__":

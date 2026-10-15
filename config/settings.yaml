@@ -13,9 +13,13 @@ startup:
 voice:
   tts_rate: 175         # words per minute
 
+audio:
+  input_device: null    # null = Windows default mic; or a number / part of the name (python -m voice.wakeword --list)
+  gain: 1.0             # raise to 2-3 if your mic is quiet
+
 wake:
   model: hey_jarvis     # pretrained openWakeWord model; custom name needs a trained model
-  threshold: 0.5        # 0-1, higher = fewer false wakes, lower = easier to trigger
+  threshold: 0.35       # 0-1, higher = fewer false wakes, lower = easier to trigger
   cooldown_seconds: 2   # ignore repeat triggers right after a wake
   acknowledgements: ["Yes?", "I'm listening.", "Go ahead."]
 

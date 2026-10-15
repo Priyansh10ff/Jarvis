@@ -171,7 +171,10 @@ class Assistant:
     def run(self) -> None:
         log.info("listening for the wake word")
         self.on_state(self.state.value)
-        with Microphone() as mic:
+        mic_device = self.settings.get("audio.input_device")
+        gain = float(self.settings.get("audio.gain", 1.0))
+        near_miss = 0.0
+        with Microphone(device=mic_device, gain=gain) as mic:
             while True:
                 frame = mic.read()  # keep draining the mic even while paused
                 if self.paused:
@@ -181,4 +184,11 @@ class Assistant:
                     self.wake.reset()
                     self._set(State.SLEEPING)
                 if self.wake.detect(frame):
+                    near_miss = 0.0
                     self._conversation(mic)
+                elif self.wake.last_score > max(0.15, near_miss):
+                    near_miss = self.wake.last_score
+                    log.info("heard something close to the wake word (score %.2f, needs %.2f)",
+                             near_miss, self.wake.threshold)
+                elif self.wake.last_score < 0.05:
+                    near_miss = 0.0
