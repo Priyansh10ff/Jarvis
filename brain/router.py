@@ -72,7 +72,9 @@ class Router:
     def prefer(self, name: str | None) -> None:
         self.preferred = name
 
-    def run(self, system: str, messages: list[Message], tools: list[Tool], execute: Execute) -> tuple[str, str]:
+    def run(
+        self, system: str, messages: list[Message], tools: list[Tool], execute: Execute, single: bool = True
+    ) -> tuple[str, str]:
         """Return (reply, provider name). Raises NoModelAvailable if all fail."""
         names = [n for n in self.order if n in self.providers]
         if self.preferred in names:
@@ -83,10 +85,13 @@ class Router:
             provider = self.providers[name]
             calls = 0
 
-            def counted(tool_name: str, args: dict[str, Any]) -> str:
+            cloud = name != "local" and self.redact_cloud
+
+            def counted(tool_name: str, args: dict[str, Any], _cloud=cloud) -> str:
                 nonlocal calls
                 calls += 1
-                return execute(tool_name, args)
+                result = execute(tool_name, args)
+                return redact(result) if _cloud else result  # screen text may hold secrets
 
             outbound = messages
             if name != "local" and self.redact_cloud:  # nothing secret leaves the PC
@@ -94,7 +99,8 @@ class Router:
 
             t0 = time.monotonic()
             try:
-                reply = provider.run(system, outbound, tools, counted, self.max_tokens, self.max_steps)
+                finals = {t.name for t in tools if t.final} if single else set()
+                reply = provider.run(system, outbound, tools, counted, self.max_tokens, self.max_steps, finals)
             except Exception as e:
                 log.warning("%s failed: %s", name, e)
                 if calls:  # never repeat actions on another model

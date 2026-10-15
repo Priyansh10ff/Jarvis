@@ -62,7 +62,7 @@ brain:
   max_tokens: 600                # room for the model's short reasoning plus the reply
   fast_actions: true             # speak "Opened Spotify" straight from the action, skipping a second model call
   timeout_seconds: 20
-  max_tool_steps: 5              # tool calls allowed per request
+  max_tool_steps: 8              # tool calls allowed per request (multi-step app control needs more)
   history_turns: 10              # past exchanges kept for follow-ups
   history_reset_minutes: 10      # forget the conversation after this long idle
   providers:
@@ -84,11 +84,13 @@ typing:
   speak_replies: true         # also say typed replies out loud
 
 security:
-  max_tool_calls_per_minute: 20  # stops a runaway model loop
+  max_tool_calls_per_minute: 30  # stops a runaway model loop
   redact_cloud: true             # scrub keys, card numbers, passwords before text goes to Groq/Claude
   blocked_domains: []            # e.g. ["example-bank.com"]; Jarvis will refuse to open them
   levels: {}                     # make a tool stricter, e.g. {screenshot: confirm, open_website: deny}
   audit_file: logs/audit.jsonl
+  private_windows: [bitwarden, 1password, keepass, lastpass, dashlane, credential, windows security,
+                    password, authenticator]   # Jarvis never reads, types into or clicks in these
 
 overlay:
   enabled: true

@@ -25,6 +25,7 @@ anthropic>=0.40
 
 # PC tools
 pillow>=10.0
+uiautomation>=2.0.20   # control apps by their buttons and fields
 
 # Typing bar
 PyQt6>=6.7

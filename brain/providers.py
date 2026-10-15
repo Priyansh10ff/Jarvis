@@ -38,7 +38,7 @@ class Provider(Protocol):
 
     def run(
         self, system: str, messages: list[Message], tools: list[Tool], execute: Execute,
-        max_tokens: int, max_steps: int,
+        max_tokens: int, max_steps: int, finals: set[str] = ...,
     ) -> str: ...
 
 
@@ -84,17 +84,17 @@ class OpenAICompatible:
         log.error("%s: none of %s available; models on this key: %s", self.name, self.FALLBACK_MODELS, sorted(ids))
         return False
 
-    def run(self, system, messages, tools, execute, max_tokens, max_steps) -> str:
+    def run(self, system, messages, tools, execute, max_tokens, max_steps, finals=frozenset()) -> str:
         from openai import NotFoundError
 
         try:
-            return self._run(system, messages, tools, execute, max_tokens, max_steps)
+            return self._run(system, messages, tools, execute, max_tokens, max_steps, finals)
         except NotFoundError:
             if self._pick_available_model():
-                return self._run(system, messages, tools, execute, max_tokens, max_steps)
+                return self._run(system, messages, tools, execute, max_tokens, max_steps, finals)
             raise
 
-    def _run(self, system, messages, tools, execute, max_tokens, max_steps) -> str:
+    def _run(self, system, messages, tools, execute, max_tokens, max_steps, finals=frozenset()) -> str:
         convo: list[dict[str, Any]] = [{"role": "system", "content": system}, *messages]
         schemas = [t.openai_schema() for t in tools] or None
 
@@ -125,7 +125,8 @@ class OpenAICompatible:
                 result = execute(c.function.name, args)
                 results.append(result)
                 convo.append({"role": "tool", "tool_call_id": c.id, "content": result})
-            quick = fast_reply(results) if self.fast else None
+            all_final = all(c.function.name in finals for c in calls)
+            quick = fast_reply(results) if self.fast and all_final else None
             if quick:
                 return quick
         return "Done."
@@ -140,7 +141,7 @@ class Claude:
         self.fast = fast
         self._client = Anthropic(api_key=api_key, timeout=timeout, max_retries=0)
 
-    def run(self, system, messages, tools, execute, max_tokens, max_steps) -> str:
+    def run(self, system, messages, tools, execute, max_tokens, max_steps, finals=frozenset()) -> str:
         convo: list[dict[str, Any]] = list(messages)
         schemas = [t.anthropic_schema() for t in tools]
 
@@ -161,7 +162,8 @@ class Claude:
                     {"type": "tool_result", "tool_use_id": u.id, "content": r} for u, r in zip(uses, results)
                 ],
             })
-            quick = fast_reply(results) if self.fast else None
+            all_final = all(u.name in finals for u in uses)
+            quick = fast_reply(results) if self.fast and all_final else None
             if quick:
                 return quick
         return "Done."

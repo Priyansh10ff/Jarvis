@@ -21,6 +21,7 @@ class Tool:
     parameters: dict[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
     level: str = "free"
     confirm_prompt: str | None = None  # what to ask before a confirm-level tool runs
+    final: bool = True  # result can be spoken as-is (no second model call needed)
 
     def openai_schema(self) -> dict[str, Any]:
         return {
@@ -41,6 +42,7 @@ def tool(
     parameters: dict[str, Any] | None = None,
     level: str = "free",
     confirm_prompt: str | None = None,
+    final: bool = True,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def wrap(func: Callable[..., str]) -> Callable[..., str]:
         REGISTRY[name] = Tool(
@@ -50,6 +52,7 @@ def tool(
             parameters=parameters or {"type": "object", "properties": {}},
             level=level,
             confirm_prompt=confirm_prompt,
+            final=final,
         )
         return func
 
