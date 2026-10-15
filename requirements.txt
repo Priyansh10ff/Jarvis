@@ -1,6 +1,6 @@
 # Core: config and secrets
 PyYAML>=6.0
-keyring>=25.0
+python-dotenv>=1.0
 
 # Startup greeting
 pyttsx3>=2.99

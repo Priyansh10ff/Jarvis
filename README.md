@@ -6,7 +6,7 @@ A personal AI assistant that lives on your PC. It wakes when you call it, talks 
 
 ## Progress
 
-- [x] Phase 0: clean slate, config, secrets in the OS keychain
+- [x] Phase 0: clean slate, config, API keys in a gitignored .env
 - [ ] Phase 1: core + voice (autostart, greeting, wake word, sleep)
 - [ ] Phase 2: brain (Groq / Claude / local routing, tool calling)
 - [ ] Phase 3: security v1
@@ -21,12 +21,11 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-API keys go into Windows Credential Manager, never into files:
+API keys go in `.env` (gitignored). Copy the template and fill in the keys you have; one is enough:
 
 ```powershell
-python -m core.secrets set groq
-python -m core.secrets set anthropic
-python -m core.secrets list
+copy .env.example .env
+python -m core.secrets
 ```
 
 Run:
