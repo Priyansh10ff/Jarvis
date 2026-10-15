@@ -13,6 +13,7 @@ import tools.system  # noqa: F401  registers the PC tools
 import tools.uia  # noqa: F401  registers app-control tools
 import tools.messaging  # registers send_message
 import tools.browser  # registers browser control
+import tools.vision  # registers screen vision
 from brain.providers import Message
 from brain.router import NoModelAvailable, Router
 from core.config import Settings
@@ -53,6 +54,9 @@ def _system_prompt(settings: Settings) -> str:
         "To work inside an app otherwise: open_app if it isn't open, then focus_window, then click_element / "
         "type_text / press_keys. If you don't know what to click, read_window first. Check each "
         "result before the next step; if a step fails, try another way once, then tell the user.\n"
+        "If an app's buttons can't be found (click_element errors, games, custom apps, images), use "
+        "click_on_screen with a clear visual description, then check_screen to confirm it worked. Use "
+        "look_at_screen for questions about what's visible ('what's this error', 'what's on my screen').\n"
         "For tasks on websites (compare prices, read an article, fill a form, look something up in "
         "detail): browse, then browser_read / browser_click / browser_fill / browser_press. To just show "
         "the user a site, open_website is enough. Never type passwords, card numbers or OTPs; ask the "
@@ -89,6 +93,7 @@ class Conversation:
         self.policy = Policy(settings)
         tools.messaging.configure(settings)
         tools.browser.configure(settings)
+        tools.vision.configure(settings)
         self.pending: tuple[str, dict[str, Any], str] | None = None  # (tool, args, question)
         log.info("models available: %s", ", ".join(self.router.available()) or "none")
 
@@ -115,6 +120,8 @@ class Conversation:
             tool_ = REGISTRY[name]
             if name == "click_element":
                 template = "click '{name}'" + (" in {window}" if args.get("window") else "")
+            elif name == "click_on_screen":
+                template = "click '{description}'"
             elif name == "browser_click":
                 template = "click '{target}' on the website"
             elif name == "browser_press":
@@ -184,6 +191,10 @@ class Conversation:
 def _cli() -> None:
     """Type to test the brain without voice: python -m brain.conversation"""
     import logging as _l
+
+    from tools.winput import make_dpi_aware
+
+    make_dpi_aware()  # the full app gets this from Qt
 
     from core.config import load_settings
 

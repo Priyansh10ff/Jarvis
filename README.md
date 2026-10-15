@@ -7,11 +7,16 @@ A personal AI assistant that lives on your PC. It wakes when you call it, talks 
 ## Progress
 
 - [x] Phase 0: clean slate, config, API keys in a gitignored .env
-- [ ] Phase 1: core + voice (autostart, greeting, wake word, sleep)
-- [ ] Phase 2: brain (Groq / Claude / local routing, tool calling)
-- [ ] Phase 3: security v1
-- [ ] Phase 4: overlay, typing bar, tray
-- [ ] Phase 5: control layers (direct, app structure, vision, verify)
+- [x] Phase 1: core + voice (autostart, greeting, always-listening or "hey" wake, sleep)
+- [x] Phase 2: brain (Groq / Claude / local routing, tool calling)
+- [x] Phase 3: security v1 (policy layer, confirmations, redaction, audit log)
+- [x] Phase 4: orb overlay, notch typing bar, tray
+- [x] Phase 5: control everything (app control, WhatsApp messaging, browser, screen vision)
+- [ ] Phase 6: dev mode (projects, Claude Code, git)
+- [ ] Phase 7: memory + proactive
+- [ ] Phase 8: security v2
+- [ ] Phase 9: house, phone, MCP
+- [ ] Phase 10: launch
 
 ## Setup (Windows)
 

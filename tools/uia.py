@@ -226,7 +226,7 @@ def click_element(name: str, window: str | None = None) -> str:
         hit = (exact or partial)
         if not hit:
             return (f"Error: no element named '{name}' found in {title}. "
-                    "Use read_window to see what is there, or the app may not expose it.")
+                    "Try read_window to see what is there, or click_on_screen to find it visually.")
         ctrl = hit[1]
         label = ctrl.Name
         for pattern in ("GetInvokePattern", "GetSelectionItemPattern", "GetTogglePattern"):

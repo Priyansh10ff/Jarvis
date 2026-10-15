@@ -172,3 +172,33 @@ def top_windows() -> list[int]:
 
     user32.EnumWindows(proc(cb), 0)
     return out
+
+
+# ── mouse ────────────────────────────────────────────────────────────────────
+
+MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
+MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x0008, 0x0010
+
+
+def click_at(x: int, y: int, button: str = "left", double: bool = False) -> None:
+    """Click at physical screen pixels (Jarvis runs DPI-aware, same pixels as screenshots)."""
+    user32.SetCursorPos(int(x), int(y))
+    time.sleep(0.05)
+    down, up = (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP) if button == "right" else (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)
+    for _ in range(2 if double else 1):
+        user32.mouse_event(down, 0, 0, 0, 0)
+        user32.mouse_event(up, 0, 0, 0, 0)
+        time.sleep(0.06)
+
+
+def make_dpi_aware() -> None:
+    """So screenshot pixels and mouse coordinates match on scaled (125%/150%) displays."""
+    if not IS_WINDOWS:
+        return
+    try:
+        user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # per-monitor v2
+    except Exception:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass

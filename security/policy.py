@@ -47,6 +47,7 @@ MESSAGING_APPS = re.compile(
     r"(?i)(whatsapp|telegram|discord|slack|teams|messenger|signal|instagram|claude|chatgpt|gmail|outlook|"
     r"mail|linkedin|twitter|\bx\b|skype|zoom)"
 )
+VISION_TOOLS = {"look_at_screen", "click_on_screen", "check_screen"}
 BROWSER_TOOLS = {"browse", "browser_click", "browser_fill", "browser_press"}
 SENSITIVE_FIELD = re.compile(
     r"(?i)(password|passcode|\bpin\b|otp|one.time|cvv|cvc|card.?number|expiry|security code|ssn|aadhaar|"
@@ -69,6 +70,7 @@ class Policy:
         self.overrides: dict[str, str] = dict(settings.get("security.levels") or {})
         self.blocked_domains = [d.lower().lstrip(".") for d in settings.get("security.blocked_domains") or []]
         self.rate = int(settings.get("security.max_tool_calls_per_minute", 20))
+        self.vision_enabled = bool(settings.get("vision.enabled", True))
         self.private_windows = [w.lower() for w in (settings.get("security.private_windows") or DEFAULT_PRIVATE_WINDOWS)]
         self._calls: deque[float] = deque()
 
@@ -112,6 +114,21 @@ class Policy:
                 pass
         return None
 
+    def _check_vision_tool(self, name: str, args: dict[str, Any]) -> Decision | None:
+        if not self.vision_enabled:
+            return Decision("deny", "screen vision is turned off in settings")
+        try:
+            from tools.uia import target_title
+
+            title = target_title(None).lower()
+        except Exception:
+            title = ""
+        if any(p in title for p in self.private_windows):
+            return Decision("deny", "a private window is in front, so no screenshot is taken")
+        if name == "click_on_screen" and RISKY_CLICKS.search(str(args.get("description", ""))):
+            return Decision("confirm")
+        return None
+
     def _check_window_tool(self, name: str, args: dict[str, Any]) -> Decision | None:
         try:
             from tools.uia import target_title
@@ -149,6 +166,11 @@ class Policy:
 
         if name in BROWSER_TOOLS:
             decision = self._check_browser_tool(name, args)
+            if decision:
+                return decision
+
+        if name in VISION_TOOLS:
+            decision = self._check_vision_tool(name, args)
             if decision:
                 return decision
 
