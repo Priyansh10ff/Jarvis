@@ -94,6 +94,7 @@ def main(startup: bool = False) -> None:
     from ui.hotkey import GlobalHotkey
     from ui.overlay import Overlay
     from ui.tray import Tray, VoiceBridge
+    from ui.notch import Notch
     from ui.typing_bar import TypingBar
 
     app = QApplication(sys.argv)
@@ -109,6 +110,13 @@ def main(startup: bool = False) -> None:
         overlay = Overlay(settings)
         bridge.state_changed.connect(overlay.on_state)
         bridge.event.connect(overlay.on_event)
+
+    if settings.get("typing.notch", True):
+        notch = Notch(dwell_ms=int(settings.get("typing.notch_hover_ms", 150)))
+        notch.hovered.connect(lambda: (notch.hide(), bar.open_from_notch()))
+        bar.closed.connect(notch.show_notch)
+        bridge.state_changed.connect(notch.set_state)
+        notch.show_notch()
 
     hotkey = GlobalHotkey(settings.get("typing.hotkey", "ctrl+alt+j"))
     hotkey.pressed.connect(bar.toggle)

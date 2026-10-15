@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QGuiApplication
 from PyQt6.QtWidgets import QFrame, QLabel, QLineEdit, QVBoxLayout, QWidget
 
@@ -23,6 +23,7 @@ QLineEdit { background: transparent; border: none; color: #f2f4f8; font-size: 18
 
 class TypingBar(QWidget):
     answered = pyqtSignal(str, str)  # (question, reply)
+    closed = pyqtSignal()
 
     def __init__(self, settings: Settings, brain: Conversation) -> None:
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
@@ -64,6 +65,14 @@ class TypingBar(QWidget):
 
         self.answered.connect(self._show_reply)
 
+        # Notch mode: fold back up when the mouse leaves (unless typing or waiting).
+        self.from_notch = False
+        self._collapse = QTimer(self, singleShot=True)
+        self._collapse.timeout.connect(self._maybe_collapse)
+        self._slide = QPropertyAnimation(self, b"pos")
+        self._slide.setDuration(180)
+        self._slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+
     # ── show / hide ──────────────────────────────────────────────────────────
     def toggle(self) -> None:
         if self.isVisible():
@@ -72,9 +81,31 @@ class TypingBar(QWidget):
             self.open()
 
     def open(self) -> None:
+        """Hotkey / tray: centered, upper third of the screen."""
+        self.from_notch = False
+        self.hint.setText("Enter to send · Esc to close")
         screen = QGuiApplication.primaryScreen().availableGeometry()
         self.adjustSize()
         self.move(screen.x() + (screen.width() - self.width()) // 2, screen.y() + screen.height() // 4)
+        self._present()
+
+    def open_from_notch(self) -> None:
+        """Drop down from the notch at the top edge."""
+        if self.isVisible():
+            return
+        self.from_notch = True
+        self.hint.setText("Enter to send · move away to hide")
+        screen = QGuiApplication.primaryScreen().geometry()
+        self.adjustSize()
+        x = screen.x() + (screen.width() - self.width()) // 2
+        self.move(x, screen.y() - self.height())
+        self._present()
+        self._slide.stop()
+        self._slide.setStartValue(self.pos())
+        self._slide.setEndValue(QPoint(x, screen.y() + 8))
+        self._slide.start()
+
+    def _present(self) -> None:
         self.show()
         self.raise_()
         self._force_foreground()
@@ -96,6 +127,30 @@ class TypingBar(QWidget):
         user32.keybd_event(0x12, 0, 2, 0)  # Alt up
         user32.ShowWindow(hwnd, 5)
         user32.SetForegroundWindow(hwnd)
+
+    def enterEvent(self, _event) -> None:  # noqa: N802
+        self._collapse.stop()
+
+    def leaveEvent(self, _event) -> None:  # noqa: N802
+        if self.from_notch:
+            # Longer grace period when a reply is showing, so it can be read.
+            self._collapse.start(4000 if self.reply.isVisible() and not self._busy else 700)
+
+    def _maybe_collapse(self) -> None:
+        if self.underMouse():
+            return
+        if self._busy or self.input.text().strip():
+            self._collapse.start(1500)  # typing or waiting for an answer: check again later
+            return
+        self.hide()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._collapse.stop()
+        self.reply.clear()
+        self.reply.hide()
+        self.adjustSize()
+        self.closed.emit()
+        super().hideEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:

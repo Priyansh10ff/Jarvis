@@ -56,7 +56,9 @@ brain:
       base_url: http://localhost:11434/v1
 
 typing:
-  hotkey: ctrl+alt+j          # opens the typing bar; modifiers: ctrl, alt, shift, win
+  notch: true                 # thin pill at the top-center; hover it to open the bar
+  notch_hover_ms: 150         # how long the mouse must rest on the notch before it opens
+  hotkey: ctrl+alt+j          # also opens the bar; modifiers: ctrl, alt, shift, win
   stop_hotkey: ctrl+alt+k     # kill switch: stop talking, cancel pending action, sleep
   hide_on_focus_loss: true
 
