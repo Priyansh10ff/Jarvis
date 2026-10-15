@@ -16,6 +16,21 @@ log = logging.getLogger("jarvis.brain")
 Message = dict[str, str]  # {"role": "user" | "assistant", "content": "..."}
 Execute = Callable[[str, dict[str, Any]], str]
 
+PENDING = "Not run yet"
+
+
+def fast_reply(results: list[str]) -> str | None:
+    """If every action succeeded, speak the tool results directly and skip a second
+    model round trip (halves the delay for 'open X', 'volume down', ...).
+    Errors and blocks go back to the model so it can explain."""
+    if not results:
+        return None
+    if any(r.startswith(("Error", "Blocked")) for r in results):
+        return None
+    if any(r.startswith(PENDING) for r in results):
+        return "Confirm?"  # the conversation replaces this with the real question
+    return ". ".join(r.rstrip(".") for r in results) + "."
+
 
 class Provider(Protocol):
     name: str
@@ -30,12 +45,23 @@ class Provider(Protocol):
 class OpenAICompatible:
     """Groq and Ollama both expose an OpenAI-compatible endpoint."""
 
-    def __init__(self, name: str, model: str, base_url: str, api_key: str, timeout: float) -> None:
+    def __init__(
+        self, name: str, model: str, base_url: str, api_key: str, timeout: float,
+        fast: bool = True, reasoning_effort: str | None = "low",
+    ) -> None:
         from openai import OpenAI
 
         self.name = name
         self.model = model
+        self.fast = fast
+        self.reasoning_effort = reasoning_effort
         self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, max_retries=0)
+
+    def _extra(self) -> dict[str, Any]:
+        # gpt-oss models think before answering; "low" keeps that short for speed.
+        if self.reasoning_effort and "gpt-oss" in self.model:
+            return {"reasoning_effort": self.reasoning_effort}
+        return {}
 
     FALLBACK_MODELS = (
         "llama-3.3-70b-versatile",
@@ -75,7 +101,7 @@ class OpenAICompatible:
         for _ in range(max_steps):
             resp = self._client.chat.completions.create(
                 model=self.model, messages=convo, tools=schemas,
-                max_tokens=max_tokens, temperature=0.4,
+                max_tokens=max_tokens, temperature=0.4, extra_body=self._extra() or None,
             )
             msg = resp.choices[0].message
             calls = msg.tool_calls or []
@@ -90,21 +116,28 @@ class OpenAICompatible:
                     for c in calls
                 ],
             })
+            results = []
             for c in calls:
                 try:
                     args = json.loads(c.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                convo.append({"role": "tool", "tool_call_id": c.id, "content": execute(c.function.name, args)})
+                result = execute(c.function.name, args)
+                results.append(result)
+                convo.append({"role": "tool", "tool_call_id": c.id, "content": result})
+            quick = fast_reply(results) if self.fast else None
+            if quick:
+                return quick
         return "Done."
 
 
 class Claude:
-    def __init__(self, model: str, api_key: str, timeout: float) -> None:
+    def __init__(self, model: str, api_key: str, timeout: float, fast: bool = True) -> None:
         from anthropic import Anthropic
 
         self.name = "claude"
         self.model = model
+        self.fast = fast
         self._client = Anthropic(api_key=api_key, timeout=timeout, max_retries=0)
 
     def run(self, system, messages, tools, execute, max_tokens, max_steps) -> str:
@@ -120,12 +153,15 @@ class Claude:
             if not uses:
                 return "".join(b.text for b in resp.content if b.type == "text").strip()
 
+            results = [execute(u.name, dict(u.input or {})) for u in uses]
             convo.append({"role": "assistant", "content": resp.content})
             convo.append({
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": u.id, "content": execute(u.name, dict(u.input or {}))}
-                    for u in uses
+                    {"type": "tool_result", "tool_use_id": u.id, "content": r} for u, r in zip(uses, results)
                 ],
             })
+            quick = fast_reply(results) if self.fast else None
+            if quick:
+                return quick
         return "Done."

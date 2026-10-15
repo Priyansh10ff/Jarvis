@@ -88,7 +88,9 @@ class Speaker:
         done = threading.Event()
         self._queue.put((text, done))
         if wait:
-            done.wait()
+            # Generous cap (about 3x normal speaking time) so a stuck speech engine can't freeze Jarvis.
+            if not done.wait(timeout=10 + len(text) / 5):
+                log.warning("speech took too long; continuing")
 
     def stop(self) -> None:
         """Cut off current speech and drop anything queued (kill switch)."""

@@ -40,6 +40,7 @@ BUILTIN = {
 }
 
 _apps_cache: dict[str, str] | None = None
+_display_names: dict[str, str] = {}
 
 
 def _norm(s: str) -> str:
@@ -64,6 +65,7 @@ def installed_apps() -> dict[str, str]:
             items = [items]
         for item in items:
             _apps_cache[_norm(item["Name"])] = item["AppID"]
+            _display_names[_norm(item["Name"])] = item["Name"]
         log.info("indexed %d start-menu apps", len(_apps_cache))
     except Exception:
         log.exception("could not list start-menu apps")
@@ -101,13 +103,13 @@ def open_app(name: str) -> str:
     key = _norm(name)
     if key in BUILTIN:
         os.startfile(BUILTIN[key])
-        return f"Opened {name}"
+        return f"Opened {key.title()}"
     match = find_app(name)
     if not match:
         return f"Error: no installed app matches '{name}'"
-    display, app_id = match
+    key, app_id = match
     subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"], creationflags=NO_WINDOW)
-    return f"Opened {display}"
+    return f"Opened {_display_names.get(key, key.title())}"
 
 
 # ── Web ───────────────────────────────────────────────────────────────────────
@@ -204,7 +206,7 @@ def screenshot() -> str:
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"screenshot-{datetime.now():%Y%m%d-%H%M%S}.png"
     ImageGrab.grab(all_screens=True).save(path)
-    return f"Saved screenshot to {path}"
+    return "Saved a screenshot to Pictures, Jarvis folder"
 
 
 @tool("lock_pc", "Lock the computer.")

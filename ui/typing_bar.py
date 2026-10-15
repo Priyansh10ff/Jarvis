@@ -114,19 +114,26 @@ class TypingBar(QWidget):
         self.input.selectAll()
 
     def _force_foreground(self) -> None:
-        """Windows blocks background apps from taking focus; a synthetic Alt tap lifts that."""
+        """Windows blocks background apps from taking focus; briefly sharing input
+        with the current foreground window lifts that, without pressing any keys."""
         import sys
 
         if sys.platform != "win32":
             return
         import ctypes
 
-        user32 = ctypes.windll.user32
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
         hwnd = int(self.winId())
-        user32.keybd_event(0x12, 0, 0, 0)  # Alt down
-        user32.keybd_event(0x12, 0, 2, 0)  # Alt up
-        user32.ShowWindow(hwnd, 5)
-        user32.SetForegroundWindow(hwnd)
+        fg = user32.GetForegroundWindow()
+        fg_thread = user32.GetWindowThreadProcessId(fg, None)
+        me = kernel32.GetCurrentThreadId()
+        attached = fg_thread and fg_thread != me and user32.AttachThreadInput(fg_thread, me, True)
+        try:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(fg_thread, me, False)
 
     def enterEvent(self, _event) -> None:  # noqa: N802
         self._collapse.stop()

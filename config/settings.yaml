@@ -19,28 +19,39 @@ audio:
   gain: 1.0             # raise to 2-3 if your mic is quiet
 
 wake:
-  mode: phrase          # phrase = say "hey" (speech-to-text); model = "hey jarvis" wake word model
+  mode: always          # always = no wake word, any command ("open chrome", "what's the time") is acted on
+                        # phrase = only after "hey"; model = "hey jarvis" wake word model
   phrases: ["hey", "hay", "hei"]   # first word that wakes it; "hey, open spotify" works in one go
+  soft_phrases: ["he", "a", "hi", "eh", "ay"]   # mishearings of "hey", only accepted before a command
+  command_starts: [open, close, search, google, play, pause, stop, next, previous, take, lock, shut,
+                   restart, turn, set, volume, mute, what, whats, who, when, where, why, how, tell,
+                   show, find, start, launch, check, type, write, create, make, go, can, could]
+                   # in "always" mode, only sentences starting with one of these are acted on
   model: hey_jarvis     # used when mode: model
   threshold: 0.35       # 0-1, higher = fewer false wakes, lower = easier to trigger
   cooldown_seconds: 2   # ignore repeat triggers right after a wake
   acknowledgements: ["Yes?", "I'm listening.", "Go ahead."]
 
 awake:
-  followup_seconds: 8        # keep listening this long after a reply, no wake word needed
+  followup_seconds: 20       # keep listening this long after a reply, no wake word needed
+  grace_seconds: 60          # after it sleeps, commands like "open chrome" still work this long without "hey"
   sleep_phrases: ["go to sleep", "sleep", "that's all", "stop listening", "never mind", "stop", "jarvis stop"]
 
 listen:
   start_timeout_seconds: 5   # give up if you don't start talking within this time
-  end_silence_ms: 800        # this much silence ends your sentence
-  max_seconds: 15
-  vad_aggressiveness: 2      # 0-3, higher filters more background noise
+  end_silence_ms: 1200       # pause this long and your sentence is done (lower = snappier, higher = fewer cut-offs)
+  max_seconds: 15            # longest command
+  wake_max_seconds: 6        # longest phrase checked for "hey" (background chatter gets cut off)
+  vad_aggressiveness: 3      # 0-3, higher filters more background noise
+  noise_ratio: 2.5           # speech must be this many times louder than the background; raise if noisy
+  min_level: 150             # ignore anything quieter than this (see the mic bar in python -m voice.wakeword)
 
 stt:
   model: large-v3-turbo      # or distil-large-v3, small.en for slower PCs
   device: auto               # auto | cuda | cpu
-  language: null             # null = auto-detect (Hinglish ok), or "en"
+  language: en               # en = fewer mistakes; hi for Hindi; null = auto-detect (noisier)
   beam_size: 1               # 1 = fastest, 5 = slightly more accurate
+  hotwords: "open, Spotify, Chrome, YouTube, notepad, volume"  # app/command words to recognise better
 
 logging:
   level: INFO
@@ -48,14 +59,16 @@ logging:
 
 brain:
   order: [groq, claude, local]   # tried in this order; missing keys or errors fall through
-  max_tokens: 300
+  max_tokens: 600                # room for the model's short reasoning plus the reply
+  fast_actions: true             # speak "Opened Spotify" straight from the action, skipping a second model call
   timeout_seconds: 20
   max_tool_steps: 5              # tool calls allowed per request
   history_turns: 10              # past exchanges kept for follow-ups
   history_reset_minutes: 10      # forget the conversation after this long idle
   providers:
     groq:
-      model: llama-3.3-70b-versatile
+      model: openai/gpt-oss-20b    # fastest Groq model with reliable tool use; openai/gpt-oss-120b is smarter
+      reasoning_effort: low
     claude:
       model: claude-haiku-5-5    # claude-sonnet-5-5 for harder questions
     local:

@@ -23,18 +23,19 @@ class NoModelAvailable(RuntimeError):
 def _build(name: str, settings: Settings) -> Provider | None:
     cfg = settings.get(f"brain.providers.{name}", {}) or {}
     timeout = float(settings.get("brain.timeout_seconds", 20))
+    fast = bool(settings.get("brain.fast_actions", True))
     model = cfg.get("model")
     if not model:
         return None
     if name == "groq":
         key = get_secret("groq")
-        return OpenAICompatible("groq", model, GROQ_URL, key, timeout) if key else None
+        return OpenAICompatible("groq", model, GROQ_URL, key, timeout, fast, cfg.get("reasoning_effort", "low")) if key else None
     if name == "claude":
         key = get_secret("anthropic")
-        return Claude(model, key, timeout) if key else None
+        return Claude(model, key, timeout, fast) if key else None
     if name == "local":
         url = cfg.get("base_url", "http://localhost:11434/v1")
-        return OpenAICompatible("local", model, url, "ollama", timeout)
+        return OpenAICompatible("local", model, url, "ollama", timeout, fast, None)
     return None
 
 

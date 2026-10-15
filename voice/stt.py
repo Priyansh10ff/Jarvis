@@ -9,6 +9,11 @@ import time
 
 import numpy as np
 
+# Never let a slow Hugging Face check freeze startup.
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "5")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
+
 log = logging.getLogger("jarvis.stt")
 
 
@@ -27,14 +32,16 @@ class Transcriber:
         self,
         model: str = "large-v3-turbo",
         device: str = "auto",
-        language: str | None = None,
+        language: str | None = "en",
         beam_size: int = 1,
+        hotwords: str | None = None,
     ) -> None:
         from faster_whisper import WhisperModel
 
         _add_nvidia_dlls()
-        self.language = language
+        self.language = language or None
         self.beam_size = beam_size
+        self.hotwords = hotwords
 
         t0 = time.monotonic()
         attempts = [("cuda", "float16"), ("cpu", "int8")] if device == "auto" else [
@@ -43,25 +50,35 @@ class Transcriber:
         last_error: Exception | None = None
         for dev, compute in attempts:
             try:
-                self._model = WhisperModel(model, device=dev, compute_type=compute)
+                self._model = self._load(WhisperModel, model, dev, compute)
                 self.device = dev
+                self._test_run()  # CUDA problems often only show up on the first inference
                 break
-            except Exception as e:  # CUDA missing or out of memory
-                log.warning("could not load %s on %s: %s", model, dev, e)
+            except Exception as e:  # CUDA/cuDNN missing, out of memory, no model files
+                log.warning("speech model on %s failed: %s", dev, e)
                 last_error = e
         else:
             raise RuntimeError(f"Could not load speech model {model}") from last_error
         log.info("speech model %s on %s ready in %.1fs", model, self.device, time.monotonic() - t0)
 
-    def warm_up(self) -> None:
-        """Run one silent inference so the first real command isn't slow."""
-        t0 = time.monotonic()
+    @staticmethod
+    def _load(WhisperModel, model: str, device: str, compute: str):
+        """Use the downloaded copy without touching the network; download only if missing."""
         try:
-            segments, _ = self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)
-            list(segments)
-        except Exception:
-            log.debug("warm-up failed", exc_info=True)
-        log.info("speech model warmed up in %.0f ms", (time.monotonic() - t0) * 1000)
+            return WhisperModel(model, device=device, compute_type=compute, local_files_only=True)
+        except Exception as e:
+            if "local" not in str(e).lower() and "not found" not in str(e).lower() and "snapshot" not in str(e).lower():
+                raise
+            log.info("speech model not downloaded yet; downloading ~1.6 GB once")
+            return WhisperModel(model, device=device, compute_type=compute)
+
+    def _test_run(self) -> None:
+        segments, _ = self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)
+        list(segments)
+
+    def warm_up(self) -> None:
+        """Kept for callers; the warm-up already happened while loading."""
+        return
 
     def transcribe(self, audio: np.ndarray) -> str:
         t0 = time.monotonic()
@@ -71,9 +88,26 @@ class Transcriber:
             language=self.language,
             beam_size=self.beam_size,
             condition_on_previous_text=False,
-            vad_filter=False,
+            vad_filter=True,  # Silero VAD trims noise before Whisper sees it
+            # threshold 0.35 (default 0.5) keeps quieter speech from a laptop mic
+            vad_parameters={"threshold": 0.35, "min_silence_duration_ms": 500, "speech_pad_ms": 300},
+            no_speech_threshold=0.6,
+            log_prob_threshold=-1.0,
+            compression_ratio_threshold=2.4,
+            hotwords=self.hotwords,
         )
-        text = " ".join(s.text.strip() for s in segments).strip()
+        kept: list[str] = []
+        for seg in segments:
+            reason = _reject(seg, self.language)
+            if reason:
+                log.info("ignored segment (%s): %s", reason, seg.text.strip())
+                continue
+            kept.append(seg.text.strip())
+        text = " ".join(kept).strip()
+        if _is_noise_text(text):
+            if text:
+                log.info("ignored (noise): %s", text)
+            text = ""
         log.info(
             "heard (%s, %.0f ms): %s",
             info.language,
@@ -81,6 +115,34 @@ class Transcriber:
             text or "<nothing>",
         )
         return text
+
+
+# Phrases Whisper is known to invent from silence or noise (from its YouTube training data).
+HALLUCINATIONS = {
+    "you", "thank you", "thanks for watching", "thank you for watching", "bye", "uh", "um",
+    "please subscribe", "subscribe", "so", "okay", "oh", "woo", "ah", "hmm", "e ai", "e aí",
+    "ご視聴ありがとうございました", "それでは、ご視聴ありがとうございました",
+}
+
+
+def _reject(seg, language: str | None) -> str | None:
+    if seg.no_speech_prob > 0.6 and seg.avg_logprob < -0.7:
+        return "probably not speech"
+    if seg.avg_logprob < -1.2:
+        return "low confidence"
+    if seg.compression_ratio > 2.4:
+        return "repetitive"
+    text = seg.text.strip()
+    if language == "en" and text and sum(ord(c) > 127 for c in text) > len(text) / 3:
+        return "wrong script"
+    return None
+
+
+def _is_noise_text(text: str) -> bool:
+    import re as _re
+
+    cleaned = _re.sub(r"[^\w\s']", "", text.lower(), flags=_re.UNICODE).strip()
+    return not cleaned or cleaned in HALLUCINATIONS
 
 
 if __name__ == "__main__":
