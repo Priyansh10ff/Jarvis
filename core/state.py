@@ -66,6 +66,10 @@ class Assistant:
         self.on_event = on_event  # ("activity", listening|thinking|speaking), ("level", 0-1), ("heard"|"reply", text)
         self._paused = threading.Event()
         self._interrupt = threading.Event()
+        self._talk = threading.Event()  # push-to-talk hotkey
+        self._partial_busy = threading.Event()
+        self.ack_style = settings.get("wake.ack", "chime")
+        self.live_captions = bool(settings.get("listen.live_captions", True))
         self.speaker = speaker
         self.wake_mode = settings.get("wake.mode", "phrase")  # phrase | model
         self.wake_words = {_normalize(w) for w in settings.get("wake.phrases") or ["hey"]}
@@ -127,11 +131,62 @@ class Assistant:
                 language=s.get("stt.language"),
                 beam_size=int(s.get("stt.beam_size", 1)),
                 hotwords=s.get("stt.hotwords"),
+                vocabulary=self._vocabulary(),
             )
             self._stt_ready.set()
         except Exception as e:
             log.exception("speech model failed to load")
             raise RuntimeError("speech model failed to load; voice is off, typing still works") from e
+
+    def _vocabulary(self) -> list[str]:
+        """Words to recognise reliably: stt.vocabulary + contact names and aliases."""
+        words = [str(w) for w in self.settings.get("stt.vocabulary") or []]
+        for name, info in (self.settings.get("contacts") or {}).items():
+            words.append(str(name))
+            words += [str(a) for a in (info or {}).get("aliases", [])]
+        return words
+
+    # ── push-to-talk ─────────────────────────────────────────────────────────
+    def talk_now(self) -> None:
+        """Hotkey: start listening immediately, no wake word (safe from any thread)."""
+        self._talk.set()
+
+    def _chime(self) -> None:
+        """A short rising two-note sound: faster and less annoying than saying "Yes?"."""
+        try:
+            import sounddevice as sd
+
+            sr = 24000
+            t = np.linspace(0, 0.07, int(sr * 0.07), endpoint=False)
+            env = np.minimum(1, np.linspace(0, 6, t.size)) * np.linspace(1, 0, t.size)
+            tone = np.concatenate([np.sin(2 * np.pi * 880 * t) * env, np.sin(2 * np.pi * 1320 * t) * env])
+            sd.play((tone * 0.25 * 32767).astype(np.int16), sr, blocking=True)
+        except Exception:
+            log.debug("chime failed", exc_info=True)
+
+    def _acknowledge(self, mic: Microphone) -> None:
+        if self.ack_style == "chime":
+            self._chime()
+            mic.flush()
+        else:
+            self._say(mic, random.choice(self.acks))
+
+    def _partial(self, audio: np.ndarray) -> None:
+        """Live caption in the background, so the mic keeps recording without gaps.
+        Skipped if the previous caption is still being worked out."""
+        if not (self.live_captions and self.stt) or self._partial_busy.is_set():
+            return
+        self._partial_busy.set()
+
+        def work() -> None:
+            try:
+                text = self.stt.transcribe_partial(audio)  # type: ignore[union-attr]
+                if text:
+                    self.on_event("partial", text)
+            finally:
+                self._partial_busy.clear()
+
+        threading.Thread(target=work, name="caption", daemon=True).start()
 
     def _set(self, state: State) -> None:
         if state != self.state:
@@ -215,7 +270,7 @@ class Assistant:
             return
         self._set(State.AWAKE)
         if not first_text:
-            self._say(mic, random.choice(self.acks))
+            self._acknowledge(mic)
         recorder = self.first_listen
         stop = self._interrupt.is_set
         pending_text = first_text
@@ -224,7 +279,7 @@ class Assistant:
             if pending_text:
                 text, pending_text = pending_text, ""
             else:
-                audio = recorder.record(mic, should_stop=stop, on_frame=self._mic_level)
+                audio = recorder.record(mic, should_stop=stop, on_frame=self._mic_level, on_partial=self._partial)
                 if audio is None or stop():
                     break
                 self.on_event("activity", "thinking")
@@ -287,7 +342,13 @@ class Assistant:
                 mic.read()
                 continue
             try:
-                audio = self.wake_listen.record(mic, should_stop=lambda: self.paused)
+                audio = self.wake_listen.record(mic, should_stop=lambda: self.paused or self._talk.is_set())
+                if self._talk.is_set():
+                    self._talk.clear()
+                    prev_audio = None
+                    log.info("push-to-talk")
+                    self._conversation(mic)
+                    continue
                 if audio is None:
                     prev_audio = None
                     continue
@@ -317,7 +378,8 @@ class Assistant:
             frame = mic.read()  # keep draining the mic even while paused
             if self._check_pause():
                 continue
-            if self.wake.detect(frame):  # type: ignore[union-attr]
+            if self._talk.is_set() or self.wake.detect(frame):  # type: ignore[union-attr]
+                self._talk.clear()
                 near_miss = 0.0
                 try:
                     self._conversation(mic)

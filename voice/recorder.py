@@ -70,8 +70,11 @@ class Recorder:
         mic: Microphone,
         should_stop: Callable[[], bool] = lambda: False,
         on_frame: Callable[[np.ndarray], None] | None = None,
+        on_partial: Callable[[np.ndarray], None] | None = None,
+        partial_every_ms: int = 900,
     ) -> np.ndarray | None:
-        """Return int16 audio of one utterance, or None if nobody spoke."""
+        """Return int16 audio of one utterance, or None if nobody spoke.
+        on_partial gets the audio so far every partial_every_ms while you talk (live captions)."""
         frame_ms = mic.frame * 1000 // SAMPLE_RATE
         # Keep ~0.65 s from before speech was detected, so a short first word ("hey") isn't cut off.
         preroll: deque[np.ndarray] = deque(maxlen=max(1, 650 // frame_ms))
@@ -99,6 +102,8 @@ class Recorder:
                 continue
 
             frames.append(frame)
+            if on_partial and (len(frames) * frame_ms) % partial_every_ms < frame_ms and voiced:
+                on_partial(np.concatenate(frames))
             silence_ms = 0 if voiced else silence_ms + frame_ms
             if silence_ms >= self.end_silence_ms:
                 break

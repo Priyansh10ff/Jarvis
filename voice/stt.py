@@ -35,13 +35,15 @@ class Transcriber:
         language: str | None = "en",
         beam_size: int = 1,
         hotwords: str | None = None,
+        vocabulary: list[str] | None = None,
     ) -> None:
         from faster_whisper import WhisperModel
 
         _add_nvidia_dlls()
         self.language = language or None
         self.beam_size = beam_size
-        self.hotwords = hotwords
+        words = [w.strip() for w in (hotwords or "").split(",") if w.strip()] + list(vocabulary or [])
+        self.hotwords = ", ".join(dict.fromkeys(words)) or None  # your names/words, spelled right
 
         t0 = time.monotonic()
         attempts = [("cuda", "float16"), ("cpu", "int8")] if device == "auto" else [
@@ -75,6 +77,18 @@ class Transcriber:
     def _test_run(self) -> None:
         segments, _ = self._model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)
         list(segments)
+
+    def transcribe_partial(self, audio: np.ndarray) -> str:
+        """Fast rough pass for live captions while you're still talking (not used for commands)."""
+        try:
+            segments, _ = self._model.transcribe(
+                audio.astype(np.float32) / 32768.0, language=self.language, beam_size=1,
+                condition_on_previous_text=False, vad_filter=False, without_timestamps=True,
+                hotwords=self.hotwords,
+            )
+            return " ".join(s.text.strip() for s in segments).strip()
+        except Exception:
+            return ""
 
     def warm_up(self) -> None:
         """Kept for callers; the warm-up already happened while loading."""

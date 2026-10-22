@@ -32,6 +32,7 @@ wake:
   model: hey_jarvis     # used when mode: model
   threshold: 0.35       # 0-1, higher = fewer false wakes, lower = easier to trigger
   cooldown_seconds: 2   # ignore repeat triggers right after a wake
+  ack: chime            # chime = short sound when it starts listening (fastest) | voice = says one of these:
   acknowledgements: ["Yes?", "I'm listening.", "Go ahead."]
 
 awake:
@@ -40,6 +41,8 @@ awake:
   sleep_phrases: ["go to sleep", "sleep", "that's all", "stop listening", "never mind", "stop", "jarvis stop"]
 
 listen:
+  push_to_talk_hotkey: ctrl+alt+space   # press, then just talk: no wake word, never misses
+  live_captions: true        # show your words under the orb while you speak
   start_timeout_seconds: 5   # give up if you don't start talking within this time
   end_silence_ms: 1200       # pause this long and your sentence is done (lower = snappier, higher = fewer cut-offs)
   max_seconds: 15            # longest command
@@ -54,6 +57,8 @@ stt:
   language: en               # en = fewer mistakes; hi for Hindi; null = auto-detect (noisier)
   beam_size: 1               # 1 = fastest, 5 = slightly more accurate
   hotwords: "open, Spotify, Chrome, YouTube, notepad, volume"  # app/command words to recognise better
+  vocabulary: [Scaler, SST, CML, Patchwork, Groq, Claude, VS Code, LeetCode, Codeforces]
+                             # your own words and names; contacts' names are added automatically
 
 logging:
   level: INFO

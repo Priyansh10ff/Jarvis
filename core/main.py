@@ -134,6 +134,9 @@ def main(startup: bool = False) -> None:
     stop_key = GlobalHotkey(settings.get("typing.stop_hotkey", "ctrl+alt+k"))
     stop_key.pressed.connect(tray.kill_switch)
     stop_key.start()
+    talk_key = GlobalHotkey(settings.get("listen.push_to_talk_hotkey", "ctrl+alt+space"))
+    talk_key.pressed.connect(lambda: bridge.assistant.talk_now() if bridge.assistant else None)
+    talk_key.start()
 
     from voice.tts import Speaker
 
@@ -162,6 +165,7 @@ def main(startup: bool = False) -> None:
 
     hotkey.stop()
     stop_key.stop()
+    talk_key.stop()
     tray.hide()
     log.info("stopped")
     logging.shutdown()

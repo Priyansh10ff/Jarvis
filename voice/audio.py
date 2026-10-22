@@ -39,7 +39,8 @@ class Microphone:
         self.device_name = info["name"]
         log.info("microphone: %s", self.device_name)
         self._stream = sd.InputStream(
-            device=index, samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=frame
+            device=index, samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=frame,
+            latency=1.0,  # 1 s buffer: brief pauses in reading (captions, logging) never drop audio
         )
 
     def __enter__(self) -> "Microphone":

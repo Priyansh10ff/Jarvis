@@ -69,6 +69,8 @@ class Overlay(QWidget):
         elif kind == "speech_level":
             self._speech_level = float(value)
             self._speech_at = time.monotonic()
+        elif kind == "partial":
+            self.caption = f"{value}…"
         elif kind == "heard":
             self.caption = f"“{value}”"
         elif kind == "reply":
