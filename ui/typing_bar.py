@@ -187,7 +187,7 @@ class TypingBar(QWidget):
 
     def _ask(self, text: str) -> None:
         try:
-            answer = self.brain.reply(text)
+            answer = self.brain.reply(text, source="typed")
         except Exception as e:  # never kill the UI
             log.exception("typing bar request failed")
             answer = f"Something went wrong: {e}"

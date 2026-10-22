@@ -37,6 +37,15 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z' ]", "", text.lower()).strip()
 
 
+def _brief(text: str, max_sentences: int = 2, max_chars: int = 260) -> str:
+    """What gets spoken: the first couple of sentences. The full reply stays on screen/in history."""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    out = " ".join(parts[:max_sentences])
+    if len(out) > max_chars:
+        out = out[:max_chars].rsplit(" ", 1)[0] + "…"
+    return out
+
+
 def _verb(word: str) -> str:
     """'Opens' -> 'open', "what's" -> 'what'."""
     w = _normalize(word).replace("'", "")
@@ -234,7 +243,7 @@ class Assistant:
             self._last_active = time.monotonic()
             if reply:
                 self.on_event("reply", reply)
-                self._say(mic, reply)
+                self._say(mic, _brief(reply))
             recorder = self.followup_listen
 
         if stop():

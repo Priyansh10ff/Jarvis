@@ -20,6 +20,10 @@ class NoModelAvailable(RuntimeError):
     pass
 
 
+class PartialFailure(RuntimeError):
+    """Some actions ran, then the model failed. Never retried elsewhere (no double actions)."""
+
+
 def _build(name: str, settings: Settings) -> Provider | None:
     cfg = settings.get(f"brain.providers.{name}", {}) or {}
     timeout = float(settings.get("brain.timeout_seconds", 20))
@@ -32,7 +36,7 @@ def _build(name: str, settings: Settings) -> Provider | None:
         return OpenAICompatible("groq", model, GROQ_URL, key, timeout, fast, cfg.get("reasoning_effort", "low")) if key else None
     if name == "claude":
         key = get_secret("anthropic")
-        return Claude(model, key, timeout, fast) if key else None
+        return Claude(model, key, timeout, fast, cfg.get("smart_model")) if key else None
     if name == "local":
         url = cfg.get("base_url", "http://localhost:11434/v1")
         return OpenAICompatible("local", model, url, "ollama", timeout, fast, None)
@@ -52,6 +56,7 @@ class Router:
             else:
                 log.info("provider %s unavailable (no key or model)", name)
         self.preferred: str | None = None
+        self.last_model = ""
         self.redact_cloud = bool(settings.get("security.redact_cloud", True))
 
     def warm_up(self) -> None:
@@ -73,7 +78,8 @@ class Router:
         self.preferred = name
 
     def run(
-        self, system: str, messages: list[Message], tools: list[Tool], execute: Execute, single: bool = True
+        self, system: str, messages: list[Message], tools: list[Tool], execute: Execute, single: bool = True,
+        small_tools: list[Tool] | None = None, smart: bool = False,
     ) -> tuple[str, str]:
         """Return (reply, provider name). Raises NoModelAvailable if all fail."""
         names = [n for n in self.order if n in self.providers]
@@ -97,15 +103,22 @@ class Router:
             if name != "local" and self.redact_cloud:  # nothing secret leaves the PC
                 outbound = [{**m, "content": redact(m["content"])} for m in messages]
 
+            # Claude handles the full tool list well (and caches it). Smaller models get only
+            # the tools that fit this request, which keeps them accurate and under rate limits.
+            use_tools = tools if name == "claude" or small_tools is None else small_tools
+            if hasattr(provider, "smart"):
+                provider.smart = smart
+
             t0 = time.monotonic()
             try:
-                finals = {t.name for t in tools if t.final} if single else set()
-                reply = provider.run(system, outbound, tools, counted, self.max_tokens, self.max_steps, finals)
+                finals = {t.name for t in use_tools if t.final} if single else set()
+                reply = provider.run(system, outbound, use_tools, counted, self.max_tokens, self.max_steps, finals)
             except Exception as e:
                 log.warning("%s failed: %s", name, e)
                 if calls:  # never repeat actions on another model
-                    return "Done, but I lost the connection before I could confirm.", name
+                    raise PartialFailure(str(e)) from e
                 continue
             log.info("%s/%s replied in %.0f ms (%d tool calls)", name, provider.model, (time.monotonic() - t0) * 1000, calls)
+            self.last_model = f"{name}/{provider.model}"
             return reply or "Done.", name
         raise NoModelAvailable("No model answered")

@@ -129,24 +129,32 @@ class OpenAICompatible:
             quick = fast_reply(results) if self.fast and all_final else None
             if quick:
                 return quick
-        return "Done."
+        return "I ran out of steps before finishing. Tell me what to do next."
 
 
 class Claude:
-    def __init__(self, model: str, api_key: str, timeout: float, fast: bool = True) -> None:
+    def __init__(self, model: str, api_key: str, timeout: float, fast: bool = True, smart_model: str | None = None) -> None:
         from anthropic import Anthropic
 
         self.name = "claude"
+        self.fast_model = model
+        self.smart_model = smart_model or model
         self.model = model
         self.fast = fast
-        self._client = Anthropic(api_key=api_key, timeout=timeout, max_retries=0)
+        self.smart = False  # set per request by the router
+        self._client = Anthropic(api_key=api_key, timeout=timeout, max_retries=1)
 
     def run(self, system, messages, tools, execute, max_tokens, max_steps, finals=frozenset()) -> str:
+        self.model = self.smart_model if self.smart else self.fast_model
         convo: list[dict[str, Any]] = list(messages)
         schemas = [t.anthropic_schema() for t in tools]
+        if schemas:
+            # Cache the (large, unchanging) tool list and system prompt: faster and much cheaper.
+            schemas[-1] = {**schemas[-1], "cache_control": {"type": "ephemeral"}}
+        system_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
 
         for _ in range(max_steps):
-            kwargs: dict[str, Any] = dict(model=self.model, system=system, messages=convo, max_tokens=max_tokens)
+            kwargs: dict[str, Any] = dict(model=self.model, system=system_blocks, messages=convo, max_tokens=max_tokens)
             if schemas:
                 kwargs["tools"] = schemas
             resp = self._client.messages.create(**kwargs)
@@ -166,4 +174,4 @@ class Claude:
             quick = fast_reply(results) if self.fast and all_final else None
             if quick:
                 return quick
-        return "Done."
+        return "I ran out of steps before finishing. Tell me what to do next."

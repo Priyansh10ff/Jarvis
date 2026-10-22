@@ -139,7 +139,9 @@ def main(startup: bool = False) -> None:
 
     speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)), voice=settings.get("voice.voice"))
     if settings.get("typing.speak_replies", True):
-        bar.answered.connect(lambda _q, answer: speaker.say(answer, wait=False))
+        from core.state import _brief
+
+        bar.answered.connect(lambda _q, answer: speaker.say(_brief(answer), wait=False))
 
     threading.Thread(target=run_voice, args=(settings, brain, bridge, speaker), name="voice", daemon=True).start()
 
