@@ -11,8 +11,10 @@ startup:
   delay_seconds: 8      # wait after logon so the desktop and audio are ready
 
 voice:
-  tts_rate: 175         # words per minute
-  voice: female         # female | male | part of a voice name (python -m voice.tts --list)
+  engine: edge          # edge = natural neural voice (needs internet) | sapi = built-in Windows voice, offline
+  voice: female         # female | male
+  edge_voice: null      # null = Indian English (Neerja / Prabhat); or any edge voice, e.g. en-US-AvaNeural
+  tts_rate: 175         # speaking speed; 175 = normal, 200 = a bit faster
 
 audio:
   input_device: null    # null = Windows default mic; or a number / part of the name (python -m voice.wakeword --list)

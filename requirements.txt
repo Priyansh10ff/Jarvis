@@ -3,7 +3,9 @@ PyYAML>=6.0
 python-dotenv>=1.0
 
 # Startup greeting
-pyttsx3>=2.99
+pyttsx3>=2.99          # offline fallback voice
+edge-tts>=7.0          # natural neural voice
+miniaudio>=1.61        # decodes the voice audio
 psutil>=7.0
 
 # Wake word

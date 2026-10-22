@@ -137,7 +137,13 @@ def main(startup: bool = False) -> None:
 
     from voice.tts import Speaker
 
-    speaker = Speaker(rate=int(settings.get("voice.tts_rate", 175)), voice=settings.get("voice.voice"))
+    speaker = Speaker(
+        rate=int(settings.get("voice.tts_rate", 175)),
+        voice=settings.get("voice.voice"),
+        engine=settings.get("voice.engine", "edge"),
+        edge_voice=settings.get("voice.edge_voice"),
+        on_level=lambda lvl: bridge.event.emit("speech_level", lvl),  # orb follows the real voice
+    )
     if settings.get("typing.speak_replies", True):
         from core.state import _brief
 

@@ -1,99 +1,84 @@
-"""Text to speech on its own thread (Windows SAPI via pyttsx3; swappable for Kokoro later).
+"""Text to speech on its own thread.
 
-One speech thread owns the engine, so the voice loop and the typing bar can both
-talk without clashing. List installed voices:  python -m voice.tts --list
+Engines:
+    edge  natural Microsoft neural voices (Indian English by default), free, needs internet
+    sapi  built-in Windows voices, robotic but fully offline (automatic fallback)
+
+Jarvis plays the audio itself, so speech can be cut off instantly (kill switch)
+and the orb pulses with the real voice. Long replies are spoken sentence by
+sentence: the next sentence is prepared while the current one plays.
+
+List voices:  python -m voice.tts --list      Test:  python -m voice.tts "Hello Priyansh"
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import queue
+import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
+
+import numpy as np
 
 log = logging.getLogger("jarvis.tts")
 
-PREFERRED = {
-    "female": ["heera", "zira", "hazel", "susan", "aria", "jenny"],
-    "male": ["ravi", "david", "mark", "george", "guy"],
+EDGE_RATE = 24000
+EDGE_VOICES = {
+    "female": "en-IN-NeerjaNeural",
+    "male": "en-IN-PrabhatNeural",
 }
+HINDI_VOICES = {"female": "hi-IN-SwaraNeural", "male": "hi-IN-MadhurNeural"}
+SAPI_PREFERRED = {
+    "female": ["heera", "zira", "hazel", "susan"],
+    "male": ["ravi", "david", "mark", "george"],
+}
+DEVANAGARI = re.compile(r"[ऀ-ॿ]")
 
 
-def _pick_voice(engine, choice: str | None):
-    voices = engine.getProperty("voices") or []
-    if not choice:
-        return None
-    choice = choice.lower()
-    names = PREFERRED.get(choice, [choice])  # "female" | "male" | part of a voice name
-    for wanted in names:
-        for v in voices:
-            if wanted in (v.name or "").lower():
-                return v
-    log.warning("no installed voice matches '%s'; using the default", choice)
-    return None
+def _sentences(text: str) -> list[str]:
+    parts = [p.strip() for p in re.split(r"(?<=[.!?।])\s+", text.strip()) if p.strip()]
+    return parts or [text]
 
 
 class Speaker:
-    def __init__(self, rate: int = 175, voice: str | None = None) -> None:
+    def __init__(
+        self,
+        rate: int = 175,
+        voice: str | None = "female",
+        engine: str = "edge",
+        edge_voice: str | None = None,
+        on_level: Callable[[float], None] | None = None,
+    ) -> None:
+        self.rate = rate
+        self.gender = (voice or "female").lower() if (voice or "").lower() in ("female", "male") else "female"
+        self.voice_pref = voice
+        self.engine = engine
+        self.edge_voice = edge_voice or EDGE_VOICES[self.gender]
+        self.on_level = on_level or (lambda _l: None)
         self._queue: queue.Queue[tuple[str, threading.Event] | None] = queue.Queue()
-        self._engine = None
-        self._ready = threading.Event()
-        self._error: Exception | None = None
-        self.voice_name = "default"
-        self._thread = threading.Thread(target=self._worker, args=(rate, voice), name="tts", daemon=True)
+        self._stop = threading.Event()
+        self._sapi = None
+        self._synth_pool = ThreadPoolExecutor(max_workers=1)
+        self.voice_name = self.edge_voice if engine == "edge" else "windows default"
+        self._thread = threading.Thread(target=self._worker, name="tts", daemon=True)
         self._thread.start()
-        self._ready.wait(15)
-        if self._error:
-            raise self._error
+        log.info("voice: %s (%s)", self.voice_name, engine)
 
-    def _worker(self, rate: int, voice: str | None) -> None:
-        try:
-            try:
-                import pythoncom
-
-                pythoncom.CoInitialize()  # SAPI is COM; this thread owns it
-            except ImportError:
-                pass
-            import pyttsx3
-
-            self._engine = pyttsx3.init()
-            self._engine.setProperty("rate", rate)
-            chosen = _pick_voice(self._engine, voice)
-            if chosen:
-                self._engine.setProperty("voice", chosen.id)
-                self.voice_name = chosen.name
-            log.info("voice: %s", self.voice_name)
-        except Exception as e:
-            self._error = e
-            self._ready.set()
-            return
-        self._ready.set()
-
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            text, done = item
-            try:
-                log.info("say: %s", text)
-                self._engine.say(text)
-                self._engine.runAndWait()
-            except Exception:
-                log.exception("speech failed")
-            finally:
-                done.set()
-
+    # ── public ───────────────────────────────────────────────────────────────
     def say(self, text: str, wait: bool = True) -> None:
         """Speak text. wait=False returns immediately (used by the typing bar)."""
-        if not text:
+        if not text or not text.strip():
             return
         done = threading.Event()
         self._queue.put((text, done))
-        if wait:
-            # Generous cap (about 3x normal speaking time) so a stuck speech engine can't freeze Jarvis.
-            if not done.wait(timeout=10 + len(text) / 5):
-                log.warning("speech took too long; continuing")
+        if wait and not done.wait(timeout=15 + len(text) / 5):
+            log.warning("speech took too long; continuing")
 
     def stop(self) -> None:
         """Cut off current speech and drop anything queued (kill switch)."""
+        self._stop.set()
         while True:
             try:
                 item = self._queue.get_nowait()
@@ -101,20 +86,125 @@ class Speaker:
                 break
             if item:
                 item[1].set()
+        if self._sapi:
+            try:
+                self._sapi.stop()
+            except Exception:
+                pass
+
+    # ── worker ───────────────────────────────────────────────────────────────
+    def _worker(self) -> None:
         try:
-            if self._engine:
-                self._engine.stop()
-        except Exception:
-            log.debug("tts stop failed", exc_info=True)
+            import pythoncom
+
+            pythoncom.CoInitialize()  # for the SAPI fallback
+        except ImportError:
+            pass
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            text, done = item
+            self._stop.clear()
+            log.info("say: %s", text)
+            try:
+                if self.engine == "edge":
+                    try:
+                        self._speak_edge(text)
+                    except Exception as e:
+                        log.warning("neural voice failed (%s); using the built-in voice", e)
+                        self._speak_sapi(text)
+                else:
+                    self._speak_sapi(text)
+            except Exception:
+                log.exception("speech failed")
+            finally:
+                self.on_level(0.0)
+                done.set()
+
+    # edge: synthesize sentence N+1 while sentence N plays
+    def _speak_edge(self, text: str) -> None:
+        sentences = _sentences(text)
+        future = self._synth_pool.submit(self._synth_edge, sentences[0])
+        for i in range(len(sentences)):
+            pcm = future.result(timeout=20)
+            if i + 1 < len(sentences):
+                future = self._synth_pool.submit(self._synth_edge, sentences[i + 1])
+            if self._stop.is_set():
+                return
+            self._play(pcm)
+            if self._stop.is_set():
+                return
+
+    def _synth_edge(self, sentence: str) -> np.ndarray:
+        import edge_tts
+        import miniaudio
+
+        voice = HINDI_VOICES[self.gender] if DEVANAGARI.search(sentence) else self.edge_voice
+        pct = int(round((self.rate - 175) / 175 * 100))  # 175 wpm = normal speed
+        rate = f"{pct:+d}%"
+
+        async def fetch() -> bytes:
+            data = bytearray()
+            async for chunk in edge_tts.Communicate(sentence, voice, rate=rate).stream():
+                if chunk["type"] == "audio":
+                    data.extend(chunk["data"])
+            return bytes(data)
+
+        mp3 = asyncio.run(fetch())
+        if not mp3:
+            raise RuntimeError("no audio returned")
+        decoded = miniaudio.decode(mp3, output_format=miniaudio.SampleFormat.SIGNED16, nchannels=1, sample_rate=EDGE_RATE)
+        return np.frombuffer(decoded.samples.tobytes(), dtype=np.int16)
+
+    def _play(self, pcm: np.ndarray) -> None:
+        import sounddevice as sd
+
+        block = 1024
+        with sd.OutputStream(samplerate=EDGE_RATE, channels=1, dtype="int16", blocksize=block) as out:
+            for start in range(0, len(pcm), block):
+                if self._stop.is_set():
+                    out.abort()
+                    return
+                chunk = pcm[start:start + block]
+                out.write(chunk.reshape(-1, 1))
+                rms = float(np.sqrt(np.mean(chunk.astype(np.float32) ** 2))) if len(chunk) else 0.0
+                self.on_level(min(1.0, rms / 6000.0))
+
+    # sapi: offline fallback
+    def _speak_sapi(self, text: str) -> None:
+        if self._sapi is None:
+            import pyttsx3
+
+            self._sapi = pyttsx3.init()
+            self._sapi.setProperty("rate", self.rate)
+            wanted = SAPI_PREFERRED.get((self.voice_pref or "").lower(), [str(self.voice_pref or "").lower()])
+            for name in wanted:
+                match = next((v for v in self._sapi.getProperty("voices") if name and name in (v.name or "").lower()), None)
+                if match:
+                    self._sapi.setProperty("voice", match.id)
+                    break
+        self._sapi.say(text)
+        self._sapi.runAndWait()
 
 
 if __name__ == "__main__":
     import sys
 
-    import pyttsx3
+    if "--list" in sys.argv:
+        print("Neural voices (voice.edge_voice):")
+        for g, v in EDGE_VOICES.items():
+            print(f"  {g:<7} {v}")
+        print("  more: run  edge-tts --list-voices  (any en-IN / en-US / en-GB voice works)")
+        try:
+            import pyttsx3
 
-    engine = pyttsx3.init()
-    for v in engine.getProperty("voices"):
-        print(f"- {v.name}")
-    if "--list" not in sys.argv:
-        print("\nTip: set voice.voice in settings.yaml to female, male, or part of a name above.")
+            print("\nOffline Windows voices (voice.engine: sapi):")
+            for v in pyttsx3.init().getProperty("voices"):
+                print(f"  {v.name}")
+        except Exception:
+            pass
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        text = " ".join(a for a in sys.argv[1:]) or "Hi Priyansh. This is how I sound now. Pretty natural, right?"
+        Speaker().say(text)

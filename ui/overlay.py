@@ -42,6 +42,8 @@ class Overlay(QWidget):
         self._target = 0.0
         self.caption = ""
         self._t0 = time.monotonic()
+        self._speech_level = 0.0
+        self._speech_at = 0.0
 
         self._fade = QPropertyAnimation(self, b"windowOpacity")
         self._fade.setDuration(220)
@@ -64,6 +66,9 @@ class Overlay(QWidget):
             self.activity = str(value)
         elif kind == "level":
             self._target = float(value)
+        elif kind == "speech_level":
+            self._speech_level = float(value)
+            self._speech_at = time.monotonic()
         elif kind == "heard":
             self.caption = f"“{value}”"
         elif kind == "reply":
@@ -112,9 +117,10 @@ class Overlay(QWidget):
     def _tick(self) -> None:
         t = time.monotonic() - self._t0
         if self.activity == "speaking":
-            # pyttsx3 gives no audio levels, so speech is animated procedurally
-            # until the voice moves to a TTS whose audio we play ourselves.
-            self._target = 0.35 + 0.45 * abs(math.sin(t * 9.0) * math.sin(t * 3.3)) + random.uniform(0, 0.1)
+            if time.monotonic() - self._speech_at < 0.25:
+                self._target = 0.2 + 0.8 * self._speech_level  # real voice level
+            else:  # offline voice gives no levels: animate procedurally
+                self._target = 0.35 + 0.45 * abs(math.sin(t * 9.0) * math.sin(t * 3.3)) + random.uniform(0, 0.1)
         elif self.activity == "thinking":
             self._target = 0.25 + 0.1 * math.sin(t * 4)
         self.level += (self._target - self.level) * 0.25
